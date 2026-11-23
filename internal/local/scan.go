@@ -83,6 +83,11 @@ func (s *Source) Rescan() {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	s.mu.Lock()
+	if s.closed.Load() {
+		s.mu.Unlock()
+		cancel()
+		return
+	}
 	if s.cancelScan != nil {
 		s.cancelScan()
 	}

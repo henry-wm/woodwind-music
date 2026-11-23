@@ -401,7 +401,7 @@ func newApp(cx *core.Scope) *app {
 	})
 	a.initSources()
 	a.pl = player.New(func(fn func()) { a.post(fn) })
-	cx.Cleanup(a.pl.Close)
+	cx.Cleanup(a.close)
 	if cx.Env().OS() == core.OSAndroid {
 		a.video = newVideoOutput(cx)
 		a.pl.Native = a.video
@@ -433,7 +433,6 @@ func newApp(cx *core.Scope) *app {
 					}
 				})
 			})
-			cx.Cleanup(func() { a.pl.Close(); disk.Close() })
 		} else {
 			a.diskErr = err.Error()
 		}
@@ -466,13 +465,22 @@ func newApp(cx *core.Scope) *app {
 	a.initDesktopLyrics()
 	cx.OnQuit(func(context.Context) {
 		a.saveSession()
-		a.pl.Close()
-		if a.disk != nil {
-			a.disk.Close()
-		}
-		a.closePlugins()
+		a.close()
 	})
 	return a
+}
+
+func (a *app) close() {
+	if a.pl != nil {
+		a.pl.Close()
+	}
+	if a.local != nil {
+		a.local.Close()
+	}
+	if a.disk != nil {
+		a.disk.Close()
+	}
+	a.closePlugins()
 }
 
 func (a *app) quit() {

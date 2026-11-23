@@ -458,6 +458,10 @@ func (s *Store) Has(t music.Track) bool {
 }
 func (s *Store) Touch(t music.Track) {
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
 	id := t.StoredID
 	if id == "" {
 		id = Key(t.Source, t.ID)
@@ -590,6 +594,10 @@ func (s *Store) ClearAutomatic() error {
 }
 func (s *Store) Configure(limit int64, enabled bool) {
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
 	s.limit = limit
 	s.enabled = enabled
 	if !enabled {
@@ -664,7 +672,14 @@ func (s *Store) gcArtwork() {
 		}
 	}
 }
-func (s *Store) Usage() Usage { s.mu.Lock(); defer s.mu.Unlock(); return s.usageLocked() }
+func (s *Store) Usage() Usage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return Usage{}
+	}
+	return s.usageLocked()
+}
 func (s *Store) usageLocked() Usage {
 	var u Usage
 	owners := map[string]bool{}

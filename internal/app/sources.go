@@ -90,6 +90,7 @@ func (a *app) closePlugins() {
 	}
 	if a.installer.pending != nil {
 		a.installer.pending.Discard()
+		a.installer.pending = nil
 	}
 }
 

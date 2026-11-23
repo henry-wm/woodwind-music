@@ -99,7 +99,14 @@ func (s *Source) companionTrack(it *item) music.Track {
 // Refresh presentation from the existing entries without walking the music
 // folders again. Scan publication takes the same lock and sees saved assets.
 func (s *Source) refreshCompanions() {
+	if s.closed.Load() {
+		return
+	}
 	s.catalogMu.Lock()
+	if s.closed.Load() {
+		s.catalogMu.Unlock()
+		return
+	}
 	before := s.cat.Load()
 	entries := make([]entry, len(before.items))
 	for i, it := range before.items {
@@ -114,6 +121,9 @@ func (s *Source) refreshCompanions() {
 // installed sources, only accepts a precise match, and deduplicates concurrent
 // requests. Missing results are retried later rather than on every replay.
 func (s *Source) Complete(t music.Track, providers []music.Source) (music.Track, *music.Lyrics) {
+	if s.closed.Load() {
+		return t, nil
+	}
 	it := s.cat.Load().byID[t.ID]
 	if it == nil || t.LocalOnly {
 		return t, nil
@@ -207,6 +217,10 @@ func (s *Source) Complete(t music.Track, providers []music.Source) (music.Track,
 		l = existing
 	}
 	s.assetsMu.Lock()
+	if !s.beginIO() {
+		s.assetsMu.Unlock()
+		return t, l
+	}
 	c := s.assets[t.ID]
 	if c.Size != it.Size || c.Mod != it.Mod {
 		c = companion{Size: it.Size, Mod: it.Mod}
@@ -231,6 +245,7 @@ func (s *Source) Complete(t music.Track, providers []music.Source) (music.Track,
 	if err == nil {
 		s.assets = next
 	}
+	s.endIO()
 	s.assetsMu.Unlock()
 	if err != nil {
 		log.Printf("local: saving companions: %v", err)

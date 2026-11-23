@@ -38,6 +38,7 @@ func TestLibraryRadioSeedsUseOnlyAllLikes(t *testing.T) {
 	files := t.TempDir()
 	writeToneWAV(t, filepath.Join(files, "Imported.wav"))
 	library := local.New(t.TempDir())
+	defer library.Close()
 	library.AddFolders(files)
 	deadline := time.Now().Add(2 * time.Second)
 	for library.Scanning() && time.Now().Before(deadline) {
