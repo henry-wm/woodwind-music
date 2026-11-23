@@ -44,8 +44,8 @@ func (p *Player) SetSpeed(speed float64) {
 	p.speed = speed
 	p.applySpeed()
 	// Avoid rebuilding artwork or lyric lists for a tempo-only change.
-	if p.track != nil && System.Position != nil {
-		System.Position(p.Position(), p.playing)
+	if p.track != nil && p.System.Position != nil {
+		p.System.Position(p.Position(), p.playing)
 	}
 }
 

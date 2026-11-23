@@ -33,18 +33,6 @@ const (
 	ModeShuffle
 )
 
-// MediaCommand is a control of the system's now-playing controls or the
-// keyboard's media keys.
-type MediaCommand int
-
-const (
-	MediaPlay MediaCommand = iota
-	MediaPause
-	MediaNext
-	MediaPrevious
-	MediaSeek
-)
-
 // NowPlaying is what the system shows of what plays: its title, its artist,
 // its album, its cover, its duration and where it is, and whether it plays.
 // The app sets it, on a platform that shows one.
@@ -57,13 +45,11 @@ type NowPlaying struct {
 	Speed                float64
 }
 
-// System, when set by the app, takes what the system's controls show, and
-// its commands: a nil now-playing clears it. Set it before New.
-var System struct {
-	Set       func(NowPlaying)
-	Position  func(time.Duration, bool) // where it is, and whether it plays
-	Clear     func()
-	OnCommand func(func(MediaCommand, time.Duration))
+// SystemMedia receives the player's metadata, transport state and clear events.
+type SystemMedia struct {
+	Set      func(NowPlaying)
+	Position func(time.Duration, bool)
+	Clear    func()
 }
 
 // Player plays a queue of tracks, from whichever source each is of. Its
@@ -73,6 +59,8 @@ type Player struct {
 	post func(func())
 	// Quiet is post without a redraw, for what mostly changes nothing, if set.
 	Quiet func(func())
+	// System receives updates from this player only.
+	System SystemMedia
 	// Source finds the source of an ID, or nil if it's gone.
 	Source func(id string) music.Source
 	// Failed, if set, hears that a source said the listener has something to
@@ -174,24 +162,6 @@ func New(post func(func())) *Player {
 	// Music, mixed far enough ahead to play on while macOS keeps the app
 	// waiting, as it does while its appearance changes.
 	audio.SetLatency(audio.LatencyPlayback)
-	// The media keys, and the controls of Control Center.
-	if System.OnCommand != nil {
-		System.OnCommand(func(cmd MediaCommand, pos time.Duration) {
-			switch cmd {
-			case MediaPlay, MediaPause:
-				if (cmd == MediaPlay) != p.playing {
-					p.TogglePlay()
-				}
-			case MediaNext:
-				p.Next()
-			case MediaPrevious:
-				p.Prev()
-			case MediaSeek:
-				p.Seek(pos)
-			}
-			p.post(func() {})
-		})
-	}
 	return p
 }
 
@@ -201,20 +171,20 @@ func (p *Player) sync() {
 		defer p.Changed()
 	}
 	if p.track == nil {
-		if System.Clear != nil {
-			System.Clear()
+		if p.System.Clear != nil {
+			p.System.Clear()
 		}
 		return
 	}
-	if System.Position != nil {
-		System.Position(p.Position(), p.playing)
+	if p.System.Position != nil {
+		p.System.Position(p.Position(), p.playing)
 	}
 }
 
 // announce shows the system the track, and its cover once loaded.
 func (p *Player) announce(t *music.Track, artwork []byte) {
-	if System.Set != nil {
-		System.Set(NowPlaying{
+	if p.System.Set != nil {
+		p.System.Set(NowPlaying{
 			Title:    t.Name,
 			Artist:   t.ArtistNames(),
 			Album:    t.Album.Name,

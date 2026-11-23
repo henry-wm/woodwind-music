@@ -49,3 +49,36 @@ func TestSettingsWindowSurvivesSidebarUpdates(t *testing.T) {
 		t.Fatal("Settings did not reopen as a new window")
 	}
 }
+
+type testWindowsTray struct{ registered bool }
+
+func (*testWindowsTray) Remove()            {}
+func (t *testWindowsTray) Registered() bool { return t.registered }
+
+func TestWindowsMainWindowCloseToTray(t *testing.T) {
+	t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", t.TempDir())
+	var a *app
+	var w *desktop.Window
+	tray := &testWindowsTray{registered: true}
+	ui := nsgotest.StartApp(t, func(cx *core.Scope) {
+		desktop.SetShutdownMode(cx, desktop.ShutdownOnExplicit)
+		a = newApp(cx)
+		a.tray = tray
+		cx.SetMainView(a.view)
+		w = desktop.MainWindow(cx)
+		a.bindMainWindow(w)
+	}, nsgotest.Environment(core.Environment{OS: core.OSWindows}), nsgotest.Size(1180, 780))
+	if ui.CloseWindow() || w.Visible() || ui.Quits != 0 {
+		t.Fatal("close destroyed or retained a visible window with a registered tray")
+	}
+	ui.Post(a.showMain)
+	ui.Settle()
+	if !w.Visible() || w.Closed() || desktop.MainWindow(a.cx) != w {
+		t.Fatal("tray restore did not reuse the preserved main window")
+	}
+	tray.registered = false
+	ui.CloseWindow()
+	if ui.Quits != 1 {
+		t.Fatal("close without a registered tray did not ask the app to quit")
+	}
+}

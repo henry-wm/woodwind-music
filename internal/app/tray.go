@@ -95,16 +95,33 @@ func (a *app) makeTray(cx *core.Scope) trayIcon {
 				items = append(items[:len(items)-2], desktop.MenuItem{Label: visibility, OnSelect: a.toggleDesktopLyrics}, desktop.MenuItem{Label: lock, OnSelect: a.toggleDesktopLyricsLock}, desktop.MenuItem{Separator: true}, desktop.MenuItem{Label: i18n.Tf("Quit %s", appName), OnSelect: a.quit})
 			}
 			return items
-		}}, a.saveSession)
+		}})
+}
+
+func (a *app) bindMainWindow(w *desktop.Window) {
+	if w == nil {
+		return
+	}
+	w.OnClosing(a.cx, func(event *desktop.WindowClosing) {
+		if a.cx.Env().OS() == core.OSWindows {
+			event.Cancel()
+			// NSGo's tray API cannot report a failed shell registration.
+			// Only hide the main window when the Windows icon can restore it.
+			tray, ok := a.tray.(interface{ Registered() bool })
+			if !ok || !tray.Registered() {
+				a.quit()
+				return
+			}
+			w.Hide()
+		}
+		a.saveSession()
+		a.post(a.applyAppIcon)
+	})
 }
 
 // showMain opens the app's window, or brings it forward.
 func (a *app) showMain() {
-	if platformRestoreMain() {
-		return
-	}
 	if w := desktop.MainWindow(a.cx); w != nil && !w.Closed() {
-		w.Show()
 		w.Focus()
 		return
 	}

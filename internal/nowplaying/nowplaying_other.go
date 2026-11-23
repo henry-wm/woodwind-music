@@ -2,9 +2,10 @@
 
 package nowplaying
 
-import "time"
+import (
+	"time"
 
-// Set, Position and Clear are no-ops where the system shows no media.
-func Set(Info)                              {}
-func Position(time.Duration, bool, float64) {}
-func Clear()                                {}
+	"github.com/nsgo-dev/nsgo/core"
+)
+
+func Bind(*core.Scope, func(Command, time.Duration)) Controls { return Controls{} }

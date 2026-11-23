@@ -19,15 +19,15 @@ func (a *app) setupAndroidMedia() {
 		return
 	}
 	a.androidMedia = &androidMedia{}
-	player.System.Set = func(info player.NowPlaying) {
+	a.pl.System.Set = func(info player.NowPlaying) {
 		a.androidMedia.info = info
 		a.publishAndroidMedia(true)
 	}
-	player.System.Position = func(pos time.Duration, playing bool) {
+	a.pl.System.Position = func(pos time.Duration, playing bool) {
 		a.androidMedia.info.Position, a.androidMedia.info.Playing = pos, playing
 		a.publishAndroidMedia(false)
 	}
-	player.System.Clear = func() { a.cx.PostHost("playback.update", map[string]any{"hasTrack": false}) }
+	a.pl.System.Clear = func() { a.cx.PostHost("playback.update", map[string]any{"hasTrack": false}) }
 	a.cx.OnHostEvent("android.lifecycle", func(data any) {
 		if event, ok := data.(map[string]any); ok {
 			if zone, ok := event["timeZone"].(string); ok && zone != "" && (a.location == nil || a.location.String() != zone) {

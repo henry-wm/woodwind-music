@@ -1,7 +1,7 @@
 //go:build windows
 
-// Package winshell supplies the Windows desktop services not yet provided by
-// NSGo: a notification-area icon and a media session that outlive a hidden UI.
+// Package winshell supplies a Windows media session and a notification-area icon
+// with shell registration feedback.
 package winshell
 
 import (
@@ -24,15 +24,11 @@ var (
 	registerClass    = user32.NewProc("RegisterClassExW")
 	createWindow     = user32.NewProc("CreateWindowExW")
 	defWindowProc    = user32.NewProc("DefWindowProcW")
-	destroyWindow    = user32.NewProc("DestroyWindow")
 	getMessage       = user32.NewProc("GetMessageW")
 	translateMessage = user32.NewProc("TranslateMessage")
 	dispatchMessage  = user32.NewProc("DispatchMessageW")
 	postMessage      = user32.NewProc("PostMessageW")
 	postQuitMessage  = user32.NewProc("PostQuitMessage")
-	showWindow       = user32.NewProc("ShowWindow")
-	showWindowAsync  = user32.NewProc("ShowWindowAsync")
-	isIconic         = user32.NewProc("IsIconic")
 	setForeground    = user32.NewProc("SetForegroundWindow")
 	getModuleHandle  = kernel32.NewProc("GetModuleHandleW")
 	notifyIcon       = shell32.NewProc("Shell_NotifyIconW")
@@ -44,12 +40,6 @@ var (
 	trackPopupMenu   = user32.NewProc("TrackPopupMenu")
 	destroyMenu      = user32.NewProc("DestroyMenu")
 	getCursorPos     = user32.NewProc("GetCursorPos")
-	enumWindows      = user32.NewProc("EnumWindows")
-	getWindowPID     = user32.NewProc("GetWindowThreadProcessId")
-	getClassName     = user32.NewProc("GetClassNameW")
-	setWindowLong    = user32.NewProc("SetWindowLongPtrW")
-	getWindowLong    = user32.NewProc("GetWindowLongPtrW")
-	callWindowProc   = user32.NewProc("CallWindowProcW")
 	registerMessage  = user32.NewProc("RegisterWindowMessageW")
 	setAppID         = shell32.NewProc("SetCurrentProcessExplicitAppUserModelID")
 )
@@ -96,28 +86,24 @@ type iconData struct {
 }
 
 type shell struct {
-	appID                   string
-	hwnd                    uintptr
-	done                    chan struct{}
-	mu                      sync.Mutex
-	jobs                    []func()
-	stopping                bool
-	tray                    iconData
-	icon                    uintptr
-	onClick, onMenu, onHide func()
-	taskbarCreated          uint32
-	media                   *mediaSession
+	appID           string
+	hwnd            uintptr
+	done            chan struct{}
+	mu              sync.Mutex
+	jobs            []func()
+	stopping        bool
+	tray            iconData
+	icon            uintptr
+	onClick, onMenu func()
+	taskbarCreated  uint32
+	media           *mediaSession
 }
 
 var (
 	current        atomic.Pointer[shell]
 	lifecycle      sync.Mutex
-	mainWindow     atomic.Uintptr
-	mainProc       atomic.Uintptr
-	allowClose     atomic.Bool
 	trayPresent    atomic.Bool
 	windowCallback = syscall.NewCallback(shellProc)
-	mainCallback   = syscall.NewCallback(mainWindowProc)
 )
 
 func wide(s string) *uint16 { p, _ := windows.UTF16PtrFromString(s); return p }
@@ -160,7 +146,6 @@ func (s *shell) run(ready chan<- error) {
 	taskbar, _, _ := registerMessage.Call(uintptr(unsafe.Pointer(wide("TaskbarCreated"))))
 	s.taskbarCreated = uint32(taskbar)
 	current.Store(s)
-	allowClose.Store(false)
 	if hr, _, _ := roInitialize.Call(1); !failed(hr) {
 		defer roUninitialize.Call()
 		s.media, err = openMedia(hwnd)
@@ -176,9 +161,6 @@ func (s *shell) run(ready chan<- error) {
 			s.media.close()
 		}
 		s.removeTray()
-		if hwnd := mainWindow.Swap(0); hwnd != 0 {
-			setWindowLong.Call(hwnd, ^uintptr(3), mainProc.Load())
-		}
 		current.Store(nil)
 	}()
 	var msg message
@@ -251,9 +233,6 @@ func shellProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 		}
 		if msg == s.taskbarCreated {
 			s.addTray()
-			if trayPresent.Load() {
-				s.attachMain()
-			}
 			return 0
 		}
 	}
@@ -262,9 +241,9 @@ func shellProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 }
 
 // ConfigureTray runs callbacks off the UI thread; callers must post UI work.
-func ConfigureTray(name string, onClick, onMenu, onHide func()) {
+func ConfigureTray(name string, onClick, onMenu func()) {
 	submit(func(s *shell) {
-		s.onClick, s.onMenu, s.onHide = onClick, onMenu, onHide
+		s.onClick, s.onMenu = onClick, onMenu
 		if s.icon == 0 {
 			exe, _ := os.Executable()
 			extractIcon.Call(uintptr(unsafe.Pointer(wide(exe))), 0, 0, uintptr(unsafe.Pointer(&s.icon)), 1)
@@ -277,9 +256,6 @@ func ConfigureTray(name string, onClick, onMenu, onHide func()) {
 		s.tray.Size = uint32(unsafe.Sizeof(s.tray))
 		copy(s.tray.Tip[:127], syscall.StringToUTF16(name))
 		s.addTray()
-		if trayPresent.Load() {
-			s.attachMain()
-		}
 	})
 }
 
@@ -315,61 +291,8 @@ func (s *shell) removeTray() {
 
 func RemoveTray() { submit(func(s *shell) { s.removeTray() }) }
 
-func (s *shell) attachMain() {
-	if mainWindow.Load() != 0 {
-		return
-	}
-	enumWindows.Call(syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
-		var pid uint32
-		getWindowPID.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
-		if pid != uint32(os.Getpid()) {
-			return 1
-		}
-		var name [128]uint16
-		getClassName.Call(hwnd, uintptr(unsafe.Pointer(&name[0])), uintptr(len(name)))
-		if syscall.UTF16ToString(name[:]) != "NsgoWindow" {
-			return 1
-		}
-		// GWL_WNDPROC. Keep the prior procedure for every message we don't own.
-		old, _, _ := getWindowLong.Call(hwnd, ^uintptr(3))
-		mainProc.Store(old)
-		old, _, _ = setWindowLong.Call(hwnd, ^uintptr(3), mainCallback)
-		if old != 0 {
-			mainProc.Store(old)
-			mainWindow.Store(hwnd)
-		}
-		return 0
-	}), 0)
-}
-
-func mainWindowProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
-	if msg == wmClose && trayPresent.Load() && !allowClose.Load() {
-		showWindow.Call(hwnd, 0)
-		if s := current.Load(); s != nil && s.onHide != nil {
-			s.onHide()
-		}
-		return 0
-	}
-	r, _, _ := callWindowProc.Call(mainProc.Load(), hwnd, uintptr(msg), wp, lp)
-	return r
-}
-
-// AllowClose distinguishes an explicit Quit from the close-to-tray button.
-func AllowClose() { allowClose.Store(true) }
-
-func RestoreMain() bool {
-	hwnd := mainWindow.Load()
-	if hwnd == 0 {
-		return false
-	}
-	cmd := uintptr(5) // SW_SHOW preserves a maximized window.
-	if r, _, _ := isIconic.Call(hwnd); r != 0 {
-		cmd = 9
-	}
-	showWindowAsync.Call(hwnd, cmd)
-	setForeground.Call(hwnd)
-	return true
-}
+// TrayRegistered reports whether the notification area accepted this app's icon.
+func TrayRegistered() bool { return trayPresent.Load() }
 
 type MenuItem struct {
 	Label     string

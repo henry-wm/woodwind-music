@@ -85,3 +85,26 @@ func TestAndroidMediaServiceBridge(t *testing.T) {
 		t.Fatalf("system position %v", got)
 	}
 }
+
+func TestAndroidOfflineNetworkUsesPlatformState(t *testing.T) {
+	t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", t.TempDir())
+	var a *app
+	env := core.Environment{OS: core.OSAndroid, Network: &core.Network{Online: true, Expensive: true}}
+	ui := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		a = newApp(cx)
+		return core.View{}
+	}, nsgotest.Environment(env))
+	if a.disk == nil || a.offlineUnmetered.Load() {
+		t.Fatal("metered startup did not set the offline download policy")
+	}
+	env.Network = &core.Network{Online: true}
+	ui.SetEnvironment(env)
+	if !a.offlineUnmetered.Load() {
+		t.Fatal("validated unmetered route was not applied")
+	}
+	env.Network = &core.Network{}
+	ui.SetEnvironment(env)
+	if a.offlineUnmetered.Load() {
+		t.Fatal("no network was treated as unmetered")
+	}
+}

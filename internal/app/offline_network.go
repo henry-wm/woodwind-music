@@ -16,15 +16,18 @@ func (a *app) setupOfflineNetwork() {
 	if a.disk == nil {
 		return
 	}
-	initial, _ := a.cx.HostParams()["music.unmetered"].(bool)
-	a.offlineUnmetered.Store(initial)
-	a.configureOfflineNetwork()
-	a.cx.OnHostEvent("android.network", func(data any) {
-		if m, ok := data.(map[string]any); ok {
-			v, _ := m["unmetered"].(bool)
-			a.offlineUnmetered.Store(v)
-			go a.disk.ResumeWaiting()
+	if a.cx.Env().OS() == core.OSAndroid {
+		update := func(network core.Network) {
+			a.offlineUnmetered.Store(network.Online && !network.Expensive)
 		}
-	})
+		update(a.cx.Env().Network())
+		a.cx.OnNetworkChange(func(network core.Network) {
+			update(network)
+			if network.Online {
+				go a.disk.ResumeWaiting()
+			}
+		})
+	}
+	a.configureOfflineNetwork()
 	go a.disk.ResumeAfterRestart()
 }

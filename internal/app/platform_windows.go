@@ -11,9 +11,10 @@ import (
 
 type windowsTray struct{}
 
-func (*windowsTray) Remove() { winshell.RemoveTray() }
+func (*windowsTray) Remove()          { winshell.RemoveTray() }
+func (*windowsTray) Registered() bool { return winshell.TrayRegistered() }
 
-func newPlatformTray(cx *core.Scope, opts desktop.TrayOptions, onHide func()) trayIcon {
+func newPlatformTray(cx *core.Scope, opts desktop.TrayOptions) trayIcon {
 	winshell.ConfigureTray(opts.Tooltip,
 		func() {
 			cx.Post(func() {
@@ -39,11 +40,7 @@ func newPlatformTray(cx *core.Scope, opts desktop.TrayOptions, onHide func()) tr
 				}
 				winshell.ShowMenu(items)
 			})
-		},
-		func() { cx.Post(onHide) })
+		})
 	cx.Cleanup(winshell.RemoveTray)
 	return &windowsTray{}
 }
-
-func platformRestoreMain() bool { return winshell.RestoreMain() }
-func platformAllowQuit()        { winshell.AllowClose() }

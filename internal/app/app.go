@@ -39,16 +39,16 @@ func Run() error {
 	nsgo.Run(func(cx *core.Scope) {
 		desktop.SetShutdownMode(cx, desktop.ShutdownOnExplicit)
 		a := newApp(cx)
-		a.openMain = func() { nsgo.SetMainView(cx, a.view) }
-		a.openMain()
-		if w := desktop.MainWindow(cx); w != nil {
-			w.OnClosing(cx, func(*desktop.WindowClosing) {
-				a.saveSession()
-				a.post(a.applyAppIcon)
-			})
+		a.openMain = func() {
+			before := desktop.MainWindow(cx)
+			nsgo.SetMainView(cx, a.view)
+			if w := desktop.MainWindow(cx); w != before {
+				a.bindMainWindow(w)
+			}
 		}
+		a.openMain()
 		a.applyAppIcon()
-		desktop.OnReopen(cx, a.openMain)
+		desktop.OnReopen(cx, a.showMain)
 	}, nsgo.WindowSize(1180, 780),
 		nsgo.WindowConstraints(core.WindowConstraints{MinWidth: 880, MinHeight: 580}))
 	return nil
@@ -449,35 +449,10 @@ func newApp(cx *core.Scope) *app {
 		a.say(i18n.T("Sleep timer ended. Playback paused."))
 	}
 	a.pl.SetVolume(a.set.Volume)
-	player.System.Set = func(info player.NowPlaying) {
-		nowplaying.Set(nowplaying.Info{Title: info.Title, Artist: info.Artist, Album: info.Album,
-			Artwork: info.Artwork, Duration: info.Duration, Position: info.Position, Playing: info.Playing, Speed: info.Speed})
-	}
-	player.System.Position = func(pos time.Duration, playing bool) { nowplaying.Position(pos, playing, a.pl.Speed()) }
-	player.System.Clear = nowplaying.Clear
 	if a.video != nil {
 		a.setupAndroidMedia()
-	}
-	nowplaying.OnCommand = func(cmd nowplaying.Command, pos time.Duration) {
-		a.post(func() {
-			switch cmd {
-			case nowplaying.Play:
-				if !a.pl.Playing() {
-					a.pl.TogglePlay()
-				}
-			case nowplaying.Pause:
-				if a.pl.Playing() {
-					a.pl.TogglePlay()
-				}
-			case nowplaying.Next:
-				a.pl.Next()
-			case nowplaying.Previous:
-				a.pl.Prev()
-			case nowplaying.Seek:
-				a.pl.Seek(pos)
-			}
-			a.heartbeat()
-		})
+	} else {
+		a.setupDesktopMedia()
 	}
 	a.restoreSession()
 	// Normalize old independent shuffle/repeat settings to a single mode.
@@ -500,7 +475,6 @@ func newApp(cx *core.Scope) *app {
 
 func (a *app) quit() {
 	a.saveSession()
-	platformAllowQuit()
 	a.cx.Quit()
 }
 
