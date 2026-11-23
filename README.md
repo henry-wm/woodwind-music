@@ -67,14 +67,14 @@ Windows 便携版表示无需安装，它与安装版仍共用当前用户的应
 
 0.1.30 的 FM、设置、歌词、列表与搜索优化见 [移动端体验优化记录](docs/MOBILE-POLISH-2026-11-15.md)。
 
-以下截图来自荣耀 GT、Android 16、应用 0.1.26，保留 115% 系统字体设置，使用本地实际曲库。
+以下为荣耀 GT（Android 16）运行 0.1.0（版本码 131）的真机截图，系统字体比例为 115%。发现和音乐库展示本地曲库，播放页、歌词和队列使用酷狗概念版音源。
 
 <table>
-  <tr><th>首页</th><th>正在播放</th><th>歌词</th></tr>
+  <tr><th>发现</th><th>正在播放</th><th>歌词</th></tr>
   <tr>
-    <td><img src="docs/android-home.png" width="240" alt="安卓首页：最近播放与迷你播放条" /></td>
-    <td><img src="docs/android-player.png" width="240" alt="安卓播放页：专辑封面与播放控制" /></td>
-    <td><img src="docs/android-lyrics.png" width="240" alt="安卓歌词：同步滚动与逐字高亮" /></td>
+    <td><img src="docs/android-home.png" width="240" alt="安卓发现页的最近播放与迷你播放条" /></td>
+    <td><img src="docs/android-player.png" width="240" alt="安卓播放页的专辑封面与播放控制" /></td>
+    <td><img src="docs/android-lyrics.png" width="240" alt="安卓歌词页的逐字高亮" /></td>
   </tr>
 </table>
 
@@ -84,9 +84,9 @@ Windows 便携版表示无需安装，它与安装版仍共用当前用户的应
 <table>
   <tr><th>音乐库</th><th>播放队列</th><th>设置</th></tr>
   <tr>
-    <td><img src="docs/android-library.png" width="240" alt="安卓音乐库：歌曲、专辑、歌手与歌单" /></td>
+    <td><img src="docs/android-library.png" width="240" alt="安卓音乐库的已存音乐、收藏与曲库入口" /></td>
     <td><img src="docs/android-queue.png" width="240" alt="安卓播放队列底部面板" /></td>
-    <td><img src="docs/android-settings.png" width="240" alt="安卓设置：语言与外观" /></td>
+    <td><img src="docs/android-settings.png" width="240" alt="安卓设置页的通用、播放、资料库、插件与缓存分类" /></td>
   </tr>
 </table>
 
