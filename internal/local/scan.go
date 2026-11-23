@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -13,6 +14,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -61,8 +63,15 @@ func (s *Source) loadIndex(folders []string) []entry {
 	})
 }
 
-func within(path, folder string) bool {
-	rel, err := filepath.Rel(folder, path)
+func within(p, folder string) bool {
+	if IsTreeURI(folder) {
+		prefix := strings.TrimRight(folder, "/") + "/"
+		return strings.HasPrefix(p, prefix)
+	}
+	if IsTreeURI(p) {
+		return false
+	}
+	rel, err := filepath.Rel(folder, p)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
@@ -107,18 +116,77 @@ func (s *Source) Rescan() {
 
 // found is a file a walk came across.
 type found struct {
-	path    string
-	size    int64
-	mod     int64
-	sidecar string
+	path         string
+	size         int64
+	mod          int64
+	sidecar      string
+	treeURI      string
+	docID        string
+	docURI       string
+	lyricsID     string
+	sidecarDocID string
+	sidecarKey   string
 }
 
 // picture is an image beside the music, named for a track or for its folder.
 type picture struct {
 	path  string
+	docID string
+	key   string
 	base  string // its name without the picture extension, in lower case
 	clean string // base without the extensions of what it was downloaded as
 	ext   int    // which extension, for picking a jpg over a png
+}
+
+type treeLyric struct {
+	exact string
+	lower string
+	docID string
+}
+
+type sidecarCache struct {
+	mu     sync.Mutex
+	paths  map[string]string
+	active map[string]chan struct{}
+}
+
+func (c *sidecarCache) fetch(ctx context.Context, key string, fn func() string) string {
+	for {
+		c.mu.Lock()
+		if p, ok := c.paths[key]; ok {
+			c.mu.Unlock()
+			return p
+		}
+		if wait := c.active[key]; wait != nil {
+			c.mu.Unlock()
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return ""
+			}
+		}
+		done := make(chan struct{})
+		if c.active == nil {
+			c.active = map[string]chan struct{}{}
+		}
+		c.active[key] = done
+		c.mu.Unlock()
+
+		stored := fn()
+
+		c.mu.Lock()
+		if stored != "" {
+			if c.paths == nil {
+				c.paths = map[string]string{}
+			}
+			c.paths[key] = stored
+		}
+		delete(c.active, key)
+		close(done)
+		c.mu.Unlock()
+		return stored
+	}
 }
 
 // mediaExts are the extensions a track or picture may have been downloaded as,
@@ -126,42 +194,87 @@ type picture struct {
 var mediaExts = []string{".mp3", ".flac", ".ogg", ".wav", ".m4a", ".aac"}
 
 func (s *Source) scan(ctx context.Context, gen int64, folders []string) {
-	files := walk(ctx, folders)
+	trees := s.treeStore()
+	files, folderErrs := walk(ctx, folders, trees)
 	if ctx.Err() != nil {
 		return
 	}
+	s.mu.Lock()
+	if gen == s.scanGen {
+		s.folderErrs = folderErrs
+	}
+	s.mu.Unlock()
 
 	// What hasn't changed needs no reading. What has stays as it was until read,
 	// for it not to blink out of what's listed.
 	prev := s.cat.Load()
 	current := make(map[string]entry, len(files))
 	var fresh []found
-	sidecarMoved := false
+	metaChanged := false
 	covers := map[string]bool{}
+	var scCache sidecarCache
 	for _, f := range files {
 		old := prev.byPath[f.path]
 		if old != nil {
 			current[f.path] = old.entry
 		}
-		if old == nil || old.Size != f.size || old.Mod != f.mod || !coverKept(old.Cover, covers) {
+		if f.treeURI == "" {
+			if old == nil || old.Size != f.size || old.Mod != f.mod || !coverKept(old.Cover, covers) {
+				fresh = append(fresh, f)
+				continue
+			}
+			if old.Sidecar != f.sidecar {
+				e := old.entry
+				e.Sidecar = f.sidecar
+				current[f.path] = e
+				metaChanged = true
+			}
+			continue
+		}
+		if old == nil || old.TreeURI != f.treeURI || old.DocID != f.docID || old.Size != f.size || old.Mod != f.mod || old.FileType == "" || !coverKept(old.Cover, covers) {
 			fresh = append(fresh, f)
 			continue
 		}
-		if old.Sidecar != f.sidecar {
-			e := old.entry
-			e.Sidecar = f.sidecar
+		e := old.entry
+		changed := false
+		if e.DocURI != f.docURI {
+			e.DocURI = f.docURI
+			changed = true
+		}
+		if e.LyricsID != f.lyricsID {
+			e.LyricsID = f.lyricsID
+			changed = true
+		}
+		if e.Cover == "" {
+			if f.sidecarDocID == "" {
+				if e.Sidecar != "" || e.SidecarKey != "" {
+					e.Sidecar = ""
+					e.SidecarKey = ""
+					changed = true
+				}
+			} else if e.SidecarKey != f.sidecarKey || !coverKept(e.Sidecar, covers) {
+				cached := s.cacheTreeSidecar(ctx, trees, f.treeURI, f.sidecarDocID, &scCache)
+				if ctx.Err() != nil {
+					return
+				}
+				e.Sidecar = cached
+				e.SidecarKey = f.sidecarKey
+				changed = true
+			}
+		}
+		if changed {
 			current[f.path] = e
-			sidecarMoved = true
+			metaChanged = true
 		}
 	}
 	gone := len(current) < len(prev.items)
-	if gone || sidecarMoved {
+	if gone || metaChanged {
 		s.publish(gen, current, false)
 	}
 
 	lastSave := time.Now()
 	read := 0
-	for e := range s.readFiles(ctx, fresh) {
+	for e := range s.readFiles(ctx, trees, fresh, &scCache) {
 		current[e.Path] = e
 		read++
 		if read%scanBatch != 0 || ctx.Err() != nil {
@@ -176,10 +289,24 @@ func (s *Source) scan(ctx context.Context, gen int64, folders []string) {
 	if ctx.Err() != nil {
 		return
 	}
-	if gone || sidecarMoved || len(fresh) > 0 {
+	if gone || metaChanged || len(fresh) > 0 {
 		s.saveIndex(current)
 	}
 	s.publish(gen, current, true)
+}
+
+func (s *Source) cacheTreeSidecar(ctx context.Context, trees TreeStore, treeURI, docID string, cache *sidecarCache) string {
+	if trees == nil || docID == "" {
+		return ""
+	}
+	key := treeURI + "\x00" + docID
+	return cache.fetch(ctx, key, func() string {
+		data, err := trees.ReadFile(ctx, treeURI, docID, maxTreeCoverBytes)
+		if err != nil || len(data) == 0 {
+			return ""
+		}
+		return s.keepCoverBytes(data, "")
+	})
 }
 
 // publish makes the entries what's listed, and says so, unless a newer scan has
@@ -220,13 +347,21 @@ func coverKept(path string, seen map[string]bool) bool {
 // walk finds the music in the folders, and the picture beside it if any.
 // Hidden files and folders are left out, as are links to folders, which could
 // lead round in circles; a folder chosen may be a link or hidden itself.
-func walk(ctx context.Context, folders []string) []found {
+func walk(ctx context.Context, folders []string, trees TreeStore) ([]found, map[string]error) {
 	var files []found
 	seen := map[string]bool{}
 	sidecars := map[string]string{}
 	ranks := map[string]int{}
 	pictures := map[string][]picture{}
+	var folderErrs map[string]error
+	diskEnd := 0
 	for _, root := range folders {
+		if ctx.Err() != nil {
+			break
+		}
+		if IsTreeURI(root) {
+			continue
+		}
 		start := root
 		if !strings.HasSuffix(start, string(filepath.Separator)) {
 			start += string(filepath.Separator) // WalkDir follows it, if it's a link
@@ -276,11 +411,166 @@ func walk(ctx context.Context, folders []string) []found {
 			return nil
 		})
 	}
-	for i := range files {
+	diskEnd = len(files)
+	for i := range diskEnd {
 		dir := filepath.Dir(files[i].path)
 		files[i].sidecar = trackSidecar(files[i].path, pictures[dir], sidecars[dir])
 	}
+
+	for _, root := range folders {
+		if ctx.Err() != nil {
+			break
+		}
+		if !IsTreeURI(root) {
+			continue
+		}
+		if trees == nil {
+			if folderErrs == nil {
+				folderErrs = map[string]error{}
+			}
+			folderErrs[root] = ErrPermissionLost
+			continue
+		}
+		entries, err := trees.Walk(ctx, root)
+		if err != nil {
+			if ctx.Err() != nil {
+				break
+			}
+			if folderErrs == nil {
+				folderErrs = map[string]error{}
+			}
+			folderErrs[root] = err
+			continue
+		}
+		treeFiles := walkTreeEntries(root, entries, seen)
+		files = append(files, treeFiles...)
+	}
+	return files, folderErrs
+}
+
+func walkTreeEntries(root string, entries []TreeEntry, seen map[string]bool) []found {
+	var files []found
+	treePics := map[string][]picture{}
+	treeFolderPic := map[string]picture{}
+	treeFolderRank := map[string]int{}
+	treeLyrics := map[string][]treeLyric{}
+	for _, te := range entries {
+		rel := strings.TrimPrefix(path.Clean("/"+strings.ReplaceAll(te.RelPath, "\\", "/")), "/")
+		if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || strings.Contains(rel, "/../") {
+			continue
+		}
+		hidden := false
+		for seg := range strings.SplitSeq(rel, "/") {
+			if strings.HasPrefix(seg, ".") {
+				hidden = true
+				break
+			}
+		}
+		if hidden {
+			continue
+		}
+		name := path.Base(rel)
+		dir := path.Dir(rel)
+		if pic, ok := pictureNamed(name, rel); ok {
+			pic.docID = te.DocID
+			pic.key = fmt.Sprintf("%s\x00%d\x00%d", te.DocID, te.Size, te.Mod)
+			treePics[dir] = append(treePics[dir], pic)
+			if rank := sidecarRank(name); rank >= 0 {
+				if have, ok := treeFolderRank[dir]; !ok || rank < have || (rank == have && pic.path < treeFolderPic[dir].path) {
+					treeFolderRank[dir] = rank
+					treeFolderPic[dir] = pic
+				}
+			}
+			continue
+		}
+		ext := strings.ToLower(path.Ext(name))
+		if ext == ".lrc" {
+			exact := strings.TrimSuffix(name, path.Ext(name))
+			treeLyrics[dir] = append(treeLyrics[dir], treeLyric{
+				exact: exact,
+				lower: strings.ToLower(exact),
+				docID: te.DocID,
+			})
+			continue
+		}
+		switch ext {
+		case ".mp3", ".flac", ".ogg", ".wav", ".m4a", ".aac":
+		default:
+			continue
+		}
+		if te.Size <= 0 || te.DocID == "" {
+			continue
+		}
+		fullPath := treeTrackPath(root, rel)
+		if seen[fullPath] {
+			continue
+		}
+		seen[fullPath] = true
+		files = append(files, found{
+			path:    fullPath,
+			size:    te.Size,
+			mod:     te.Mod,
+			treeURI: root,
+			docID:   te.DocID,
+			docURI:  te.DocURI,
+		})
+	}
+	for i := range files {
+		rel := strings.TrimPrefix(files[i].path, strings.TrimRight(root, "/")+"/")
+		dir := path.Dir(rel)
+		name := path.Base(rel)
+		if pic := trackSidecarPicture(name, treePics[dir], treeFolderPic[dir]); pic.docID != "" {
+			files[i].sidecarDocID = pic.docID
+			files[i].sidecarKey = pic.key
+		}
+		files[i].lyricsID = matchTreeLyric(name, treeLyrics[dir])
+	}
 	return files
+}
+
+func matchTreeLyric(name string, lyrics []treeLyric) string {
+	stem := strings.TrimSuffix(name, path.Ext(name))
+	lower := strings.ToLower(stem)
+	best := ""
+	bestExact := false
+	for _, l := range lyrics {
+		if l.exact == stem {
+			if !bestExact || l.docID < best {
+				best = l.docID
+				bestExact = true
+			}
+		} else if !bestExact && l.lower == lower {
+			if best == "" || l.docID < best {
+				best = l.docID
+			}
+		}
+	}
+	return best
+}
+
+func trackSidecarPicture(name string, pictures []picture, folder picture) picture {
+	stem := strings.ToLower(strings.TrimSuffix(name, path.Ext(name)))
+	clean := cleanName(stem)
+	best, bestRank := picture{}, math.MaxInt
+	for _, pic := range pictures {
+		match := -1
+		switch {
+		case pic.base == stem:
+			match = 0
+		case pic.clean == clean:
+			match = 1
+		}
+		if match < 0 {
+			continue
+		}
+		if rank := match*3 + pic.ext; rank < bestRank || (rank == bestRank && pic.path < best.path) {
+			best, bestRank = pic, rank
+		}
+	}
+	if best.docID != "" {
+		return best
+	}
+	return folder
 }
 
 // pictureNamed makes a picture of an image file, if it's one the app can show.
@@ -361,7 +651,7 @@ func sidecarRank(name string) int {
 
 // readFiles reads the files on a few goroutines, answering each as it's done.
 // The channel closes once all are read, or soon after ctx ends.
-func (s *Source) readFiles(ctx context.Context, files []found) <-chan entry {
+func (s *Source) readFiles(ctx context.Context, trees TreeStore, files []found, scCache *sidecarCache) <-chan entry {
 	jobs := make(chan found)
 	out := make(chan entry)
 	go func() {
@@ -378,7 +668,7 @@ func (s *Source) readFiles(ctx context.Context, files []found) <-chan entry {
 	for range min(runtime.NumCPU(), 4) {
 		workers.Go(func() {
 			for f := range jobs {
-				if e, ok := s.readFile(f); ok {
+				if e, ok := s.readFile(ctx, trees, f, scCache); ok {
 					out <- e
 				}
 			}
@@ -391,13 +681,32 @@ func (s *Source) readFiles(ctx context.Context, files []found) <-chan entry {
 	return out
 }
 
+type audioReader interface {
+	io.ReaderAt
+	io.ReadSeeker
+}
+
 // readFile reads what's known of a file, as far as there is any.
-func (s *Source) readFile(file found) (entry, bool) {
-	f, err := os.Open(file.path)
-	if err != nil {
-		return entry{}, false
+func (s *Source) readFile(ctx context.Context, trees TreeStore, file found, scCache *sidecarCache) (entry, bool) {
+	var f audioReader
+	var closer io.Closer
+	if file.treeURI != "" {
+		if trees == nil {
+			return entry{}, false
+		}
+		r, err := trees.Open(ctx, file.treeURI, file.docID, file.size)
+		if err != nil {
+			return entry{}, false
+		}
+		f, closer = r, r
+	} else {
+		of, err := os.Open(file.path)
+		if err != nil {
+			return entry{}, false
+		}
+		f, closer = of, of
 	}
-	defer f.Close()
+	defer closer.Close()
 
 	typ := fileType(f, file.path)
 	var track m4aInfo
@@ -407,9 +716,11 @@ func (s *Source) readFile(file found) (entry, bool) {
 			return entry{}, false
 		}
 	}
-	t := readTags(f, typ, file.size)
+	t := readTags(f, file.path, typ, file.size)
 	e := entry{
 		Path: file.path, Size: file.size, Mod: file.mod,
+		TreeURI: file.treeURI, DocID: file.docID, DocURI: file.docURI, LyricsID: file.lyricsID,
+		FileType: typ, Lossless: typ == "flac" || typ == "wav" || (typ == "m4a" && track.lossless),
 		Title: t.title, Artist: t.artist, Album: t.album, AlbumArtist: t.albumArtist,
 		Year: t.year, Track: t.track, Disc: t.disc,
 		Sidecar: file.sidecar,
@@ -439,13 +750,18 @@ func (s *Source) readFile(file found) (entry, bool) {
 	if t.picture != nil {
 		e.Cover = s.keepCover(t.picture)
 	}
+	if file.treeURI != "" && e.Cover == "" && file.sidecarDocID != "" {
+		e.Sidecar = s.cacheTreeSidecar(ctx, trees, file.treeURI, file.sidecarDocID, scCache)
+		e.SidecarKey = file.sidecarKey
+	}
 	return e, true
 }
 
 // nameOfFile makes a title of a file's name, and an artist if it reads
 // "Artist - Title". "01 - Title" names no artist.
-func nameOfFile(path string) (title, artist string) {
-	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+func nameOfFile(p string) (title, artist string) {
+	base := entryBase(p)
+	name := strings.TrimSuffix(base, path.Ext(base))
 	before, after, ok := strings.Cut(name, " - ")
 	before, after = strings.TrimSpace(before), strings.TrimSpace(after)
 	if !ok || before == "" || after == "" {
@@ -469,10 +785,10 @@ type tags struct {
 // readTags reads a file's tags. The library panics on some malformed files, and
 // answers nothing if it can't make them out: either way, what's found so far
 // stands.
-func readTags(f *os.File, typ string, size int64) (t tags) {
+func readTags(f audioReader, name, typ string, size int64) (t tags) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("local: reading tags of %s: %v", f.Name(), r)
+			log.Printf("local: reading tags of %s: %v", name, r)
 		}
 	}()
 	var src io.ReadSeeker = f
@@ -628,31 +944,35 @@ func parseGain(text string) float64 {
 // whole album's copies to be one file. It returns the path, or "" if it's not
 // a picture the app can show.
 func (s *Source) keepCover(pic *tag.Picture) string {
-	ext := coverExt(pic)
+	return s.keepCoverBytes(pic.Data, pic.MIMEType)
+}
+
+func (s *Source) keepCoverBytes(data []byte, mimeHint string) string {
+	ext := coverExtBytes(data, mimeHint)
 	if ext == "" {
 		return ""
 	}
-	sum := sha256.Sum256(pic.Data)
-	path := filepath.Join(s.coverDir(), hex.EncodeToString(sum[:8])+"."+ext)
-	if _, err := os.Stat(path); err == nil {
-		return path
+	sum := sha256.Sum256(data)
+	p := filepath.Join(s.coverDir(), hex.EncodeToString(sum[:8])+"."+ext)
+	if _, err := os.Stat(p); err == nil {
+		return p
 	}
-	if err := writeAtomic(path, pic.Data); err != nil {
+	if err := writeAtomic(p, data); err != nil {
 		log.Printf("local: keeping cover: %v", err)
 		return ""
 	}
-	return path
+	return p
 }
 
-// coverExt goes by what the picture holds, since taggers often say wrong, and
-// else by what it says it is.
-func coverExt(pic *tag.Picture) string {
-	if len(pic.Data) == 0 {
+// coverExtBytes goes by what the picture holds, since taggers often say wrong,
+// and else by what it says it is.
+func coverExtBytes(data []byte, mimeHint string) string {
+	if len(data) == 0 {
 		return ""
 	}
-	mime := http.DetectContentType(pic.Data)
+	mime := http.DetectContentType(data)
 	if !strings.HasPrefix(mime, "image/") {
-		mime = pic.MIMEType
+		mime = mimeHint
 	}
 	switch strings.ToLower(mime) {
 	case "image/jpeg", "image/jpg":
@@ -667,7 +987,7 @@ func coverExt(pic *tag.Picture) string {
 
 // fileType says whether a file is an mp3, a flac, an ogg, a wav, an m4a or an
 // aac: by what it holds if that tells, and else by its name.
-func fileType(f io.ReaderAt, path string) string {
+func fileType(f io.ReaderAt, p string) string {
 	var head [12]byte
 	if _, err := f.ReadAt(head[:], 0); err == nil {
 		if string(head[4:8]) == "ftyp" {
@@ -690,7 +1010,11 @@ func fileType(f io.ReaderAt, path string) string {
 	if _, ok := parseFrameHeader(head[:4]); ok {
 		return "mp3"
 	}
-	switch ext := strings.ToLower(filepath.Ext(path)); ext {
+	return extFileType(p)
+}
+
+func extFileType(p string) string {
+	switch ext := strings.ToLower(path.Ext(entryBase(p))); ext {
 	case ".flac", ".ogg", ".wav", ".m4a", ".aac":
 		return ext[1:]
 	}

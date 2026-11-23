@@ -111,6 +111,7 @@ public class NsgoActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (devHost == null && DocumentLibrary.onActivityResult(this, request, result, data)) return;
         if (view != null) view.activityResult(request, result, data);
     }
 

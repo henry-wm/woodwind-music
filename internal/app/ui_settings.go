@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/nsgo-dev/nsgo/ui"
 
 	"github.com/HengWh/woodwind-music/internal/i18n"
+	"github.com/HengWh/woodwind-music/internal/local"
 )
 
 // settingsRowDef is a row of the settings: what it is, what it means, and
@@ -367,7 +369,15 @@ func (a *app) libraryRows() []settingsRowDef {
 		control: a.localFilesControl}}
 	for _, f := range folders {
 		path := f
-		rows = append(rows, settingsRowDef{label: path, icon: lucide.Folder(), small: true,
+		sub := ""
+		if err := a.local.FolderError(path); err != nil {
+			if errors.Is(err, local.ErrPermissionLost) {
+				sub = i18n.T("Folder access lost. Remove and add it again.")
+			} else {
+				sub = err.Error()
+			}
+		}
+		rows = append(rows, settingsRowDef{label: a.local.FolderLabel(path), sub: sub, icon: lucide.Folder(), small: true,
 			control: func(p palette) core.Node {
 				return a.settingsAction(p, i18n.T("Remove"), "settings-remove-folder", false, func() {
 					a.removeFolder(path)

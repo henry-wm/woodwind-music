@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -20,6 +19,15 @@ type entry struct {
 	Size int64  `json:"size"`
 	Mod  int64  `json:"mod"` // in nanoseconds since 1970
 
+	// Document-tree metadata (empty for normal local disk files).
+	TreeURI    string `json:"treeUri,omitempty"`
+	DocID      string `json:"docId,omitempty"`
+	DocURI     string `json:"docUri,omitempty"`
+	LyricsID   string `json:"lyricsId,omitempty"`
+	SidecarKey string `json:"sidecarKey,omitempty"`
+	FileType   string `json:"fileType,omitempty"`
+	Lossless   bool   `json:"lossless,omitempty"`
+
 	Title       string `json:"title"`
 	Artist      string `json:"artist,omitempty"` // as the tag has it
 	Album       string `json:"album,omitempty"`
@@ -30,7 +38,7 @@ type entry struct {
 	Duration    int64  `json:"duration,omitempty"` // milliseconds
 
 	Cover   string `json:"cover,omitempty"`   // the picture inside, once kept
-	Sidecar string `json:"sidecar,omitempty"` // the picture beside it
+	Sidecar string `json:"sidecar,omitempty"` // the picture beside it (or cached cover for tree folders)
 
 	SupplementCover string `json:"-"`
 
@@ -94,7 +102,7 @@ func albumKey(e *entry) string {
 	if e.AlbumArtist != "" {
 		return name + "\x00" + strings.ToLower(e.AlbumArtist)
 	}
-	return name + "\x00" + filepath.Dir(e.Path)
+	return name + "\x00" + entryDir(e)
 }
 
 // artistSplit is what's between artists in a tag. Not commas: "Earth, Wind &

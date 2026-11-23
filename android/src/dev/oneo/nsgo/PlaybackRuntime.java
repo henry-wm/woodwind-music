@@ -24,11 +24,12 @@ final class PlaybackRuntime {
         if (view == null) {
             context = new MutableContextWrapper(host);
             view = new NsgoView(context);
-            view.setParams(Map.of("music.android", true, "music.timeZone", TimeZone.getDefault().getID()));
+            view.setParams(Map.of("music.android", true, "music.saf", true, "music.timeZone", TimeZone.getDefault().getID()));
             view.handle("playback.update", (data, reply) -> {
                 if (data instanceof Map) update((Map<String, Object>) data);
                 reply.resolve(null);
             });
+            DocumentLibrary.register(view, () -> activity, () -> context);
             view.setErrorListener(message -> {
                 Log.e("wood wind music", message);
                 command("pause", 0);
@@ -80,6 +81,7 @@ final class PlaybackRuntime {
     static void releaseIfIdle() {
         ui.postDelayed(() -> {
             if (activity == null && PlaybackService.instance == null && view != null) {
+                DocumentLibrary.closeAll();
                 view.stop();
                 view = null;
                 context = null;

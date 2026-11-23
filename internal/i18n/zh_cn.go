@@ -3,6 +3,8 @@ package i18n
 // zhCN is the app's text in Simplified Chinese, by its English.
 var zhCN = map[string]string{
 	"The local audio file is missing or incomplete":                              "本地音频文件缺失或不完整",
+	"Scanning folder…":                                                           "正在扫描文件夹…",
+	"Folder access lost. Remove and add it again.":                               "目录访问权限已失效，请移除后重新添加。",
 	"The original plugin is unavailable and there is no local audio copy":        "原插件不可用，且没有可播放的本地音频副本",
 	"Offline requests added. View progress in Saved Music.":                      "已添加离线保存请求，可在“已存音乐”中查看进度。",
 	"Offline retention canceled. These copies can now be automatically removed.": "已取消保留离线，这些副本之后可能被自动清理。",

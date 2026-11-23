@@ -9,6 +9,7 @@ package local
 
 import (
 	"cmp"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -62,6 +63,8 @@ type Source struct {
 	// mu is only held for moments: nothing under it touches the disk.
 	mu         sync.RWMutex
 	lib        library
+	trees      TreeStore
+	folderErrs map[string]error
 	onChange   func()
 	scanning   bool
 	scanGen    int64 // the scan under way; an older one publishes nothing
@@ -114,11 +117,54 @@ func (s *Source) notify() {
 	}
 }
 
+// SetTreeStore installs the backend that reads persisted document trees (such
+// as Android SAF folders). Set it before the first Rescan.
+func (s *Source) SetTreeStore(store TreeStore) {
+	s.mu.Lock()
+	s.trees = store
+	s.mu.Unlock()
+}
+
+func (s *Source) treeStore() TreeStore {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.trees
+}
+
 // Folders returns the folders scanned.
 func (s *Source) Folders() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return slices.Clone(s.lib.Folders)
+}
+
+// FolderLabel returns the human-readable name for a configured folder.
+func (s *Source) FolderLabel(folder string) string {
+	key := cleanPath(folder)
+	s.mu.RLock()
+	name := s.lib.FolderNames[key]
+	if name == "" {
+		name = s.lib.FolderNames[folder]
+	}
+	s.mu.RUnlock()
+	if name != "" {
+		return name
+	}
+	if IsTreeURI(key) {
+		return prettyTreeLabel(key)
+	}
+	return folder
+}
+
+// FolderError returns the last scan error recorded for folder, if any.
+func (s *Source) FolderError(folder string) error {
+	key := cleanPath(folder)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.folderErrs[key]; err != nil {
+		return err
+	}
+	return s.folderErrs[folder]
 }
 
 // AddFolders keeps the folders and starts a scan.
@@ -136,12 +182,57 @@ func (s *Source) AddFolders(paths ...string) {
 	})
 }
 
+// AddTreeFolder registers a persisted document tree URI with an optional
+// display name and starts a scan.
+func (s *Source) AddTreeFolder(uri, name string) {
+	uri = strings.TrimSpace(uri)
+	if !IsTreeURI(uri) {
+		return
+	}
+	name = strings.TrimSpace(name)
+	err := s.change(func() error {
+		if !slices.Contains(s.lib.Folders, uri) {
+			s.lib.Folders = append(s.lib.Folders, uri)
+		}
+		if name != "" {
+			if s.lib.FolderNames == nil {
+				s.lib.FolderNames = map[string]string{}
+			}
+			s.lib.FolderNames[uri] = name
+		}
+		delete(s.folderErrs, uri)
+		return nil
+	}, false)
+	if err != nil {
+		log.Printf("local: saving library: %v", err)
+	}
+	s.Rescan()
+	s.notify()
+}
+
 // RemoveFolder lets a folder go and starts a scan, which takes its tracks away.
 func (s *Source) RemoveFolder(path string) {
 	abs := cleanPath(path)
-	s.changeFolders(func(folders []string) []string {
-		return slices.DeleteFunc(folders, func(f string) bool { return f == abs })
-	})
+	var releaseURI string
+	err := s.change(func() error {
+		s.lib.Folders = slices.DeleteFunc(s.lib.Folders, func(f string) bool { return f == abs })
+		delete(s.lib.FolderNames, abs)
+		delete(s.folderErrs, abs)
+		if IsTreeURI(abs) {
+			releaseURI = abs
+		}
+		return nil
+	}, false)
+	if err != nil {
+		log.Printf("local: saving library: %v", err)
+	}
+	if releaseURI != "" {
+		if trees := s.treeStore(); trees != nil {
+			trees.Release(releaseURI)
+		}
+	}
+	s.Rescan()
+	s.notify()
 }
 
 func (s *Source) changeFolders(fn func([]string) []string) {
@@ -157,6 +248,9 @@ func (s *Source) changeFolders(fn func([]string) []string) {
 }
 
 func cleanPath(path string) string {
+	if IsTreeURI(path) {
+		return strings.TrimSpace(path)
+	}
 	if abs, err := filepath.Abs(path); err == nil {
 		return abs
 	}
@@ -539,12 +633,20 @@ func (s *Source) PostComment(trackID, text string) (*music.Comment, error) {
 	return nil, music.ErrUnsupported
 }
 
+const (
+	maxTreeLyricsBytes = 2 << 20  // 2 MiB safety cap for sidecar .lrc
+	maxTreeCoverBytes  = 16 << 20 // 16 MiB safety cap for sidecar images
+)
+
 // Lyrics answers the .lrc beside the file, or else what's in its tags if it's
 // timed: plain words can't follow the song.
 func (s *Source) Lyrics(id string) (*music.Lyrics, error) {
 	it, ok := s.cat.Load().byID[id]
 	if !ok {
 		return nil, music.ErrUnavailable
+	}
+	if it.TreeURI != "" {
+		return s.treeLyrics(it), nil
 	}
 	base := strings.TrimSuffix(it.Path, filepath.Ext(it.Path))
 	for _, ext := range []string{".lrc", ".LRC"} {
@@ -564,11 +666,33 @@ func (s *Source) Lyrics(id string) (*music.Lyrics, error) {
 	if info, err := f.Stat(); err == nil {
 		size = info.Size()
 	}
-	tags := readTags(f, fileType(f, it.Path), size)
+	tags := readTags(f, it.Path, fileType(f, it.Path), size)
 	if l := (&music.Lyrics{LRC: tags.lyrics}); len(lyrics.FromSource(l)) > 0 {
 		return l, nil
 	}
 	return s.companionLyrics(it), nil
+}
+
+func (s *Source) treeLyrics(it *item) *music.Lyrics {
+	trees := s.treeStore()
+	if trees != nil && it.LyricsID != "" {
+		if b, err := trees.ReadFile(context.Background(), it.TreeURI, it.LyricsID, maxTreeLyricsBytes); err == nil {
+			l := &music.Lyrics{LRC: strings.TrimPrefix(string(b), "\xef\xbb\xbf")}
+			if len(lyrics.FromSource(l)) > 0 {
+				return l
+			}
+		}
+	}
+	if trees != nil && it.DocID != "" {
+		if f, err := trees.Open(context.Background(), it.TreeURI, it.DocID, it.Size); err == nil {
+			tags := readTags(f, it.Path, fileType(f, it.Path), it.Size)
+			_ = f.Close()
+			if l := (&music.Lyrics{LRC: tags.lyrics}); len(lyrics.FromSource(l)) > 0 {
+				return l
+			}
+		}
+	}
+	return s.companionLyrics(it)
 }
 
 // Stream answers the file itself. The quality asked for doesn't come into it.
@@ -576,6 +700,9 @@ func (s *Source) Stream(id, quality string) (*music.Stream, error) {
 	it, ok := s.cat.Load().byID[id]
 	if !ok {
 		return nil, music.ErrUnavailable
+	}
+	if it.TreeURI != "" {
+		return s.treeStream(it)
 	}
 	f, err := os.Open(it.Path)
 	if err != nil {
@@ -605,6 +732,38 @@ func (s *Source) Stream(id, quality string) (*music.Stream, error) {
 	return st, nil
 }
 
+func (s *Source) treeStream(it *item) (*music.Stream, error) {
+	if it.DocURI == "" {
+		return nil, music.ErrUnavailable
+	}
+	size := it.Size
+	if trees := s.treeStore(); trees != nil && it.DocID != "" {
+		sz, ok := trees.Stat(context.Background(), it.TreeURI, it.DocID)
+		if !ok {
+			return nil, music.ErrUnavailable
+		}
+		if sz > 0 {
+			size = sz
+		}
+	}
+	typ := it.FileType
+	if typ == "" {
+		typ = extFileType(it.Path)
+	}
+	q := "high"
+	if it.Lossless || typ == "flac" || typ == "wav" {
+		q = "lossless"
+	}
+	return &music.Stream{
+		URL:     it.DocURI,
+		Type:    typ,
+		Quality: q,
+		Size:    size,
+		Gain:    it.Gain,
+		Peak:    it.Peak,
+	}, nil
+}
+
 func (s *Source) RemotePlay(ids []string, start int, position int64) error {
 	return music.ErrUnsupported
 }
@@ -619,10 +778,11 @@ func (s *Source) RemoteUse(deviceID string) error          { return music.ErrUns
 // library is what library.json keeps: the IDs of tracks that may be away for
 // now, and back when their folder is.
 type library struct {
-	Folders   []string   `json:"folders,omitempty"`
-	Likes     []string   `json:"likes,omitempty"` // newest first
-	Playlists []playlist `json:"playlists,omitempty"`
-	Recent    []string   `json:"recent,omitempty"` // last played first
+	Folders     []string          `json:"folders,omitempty"`
+	FolderNames map[string]string `json:"folderNames,omitempty"`
+	Likes       []string          `json:"likes,omitempty"` // newest first
+	Playlists   []playlist        `json:"playlists,omitempty"`
+	Recent      []string          `json:"recent,omitempty"` // last played first
 }
 
 type playlist struct {

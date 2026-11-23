@@ -229,6 +229,8 @@ type app struct {
 	radioRequest        int
 
 	local        *local.Source
+	saf          *androidSAFStore
+	pickingSAF   bool
 	pl           *player.Player
 	video        *videoOutput
 	importing    bool
@@ -390,6 +392,10 @@ func newApp(cx *core.Scope) *app {
 	zone, _ := cx.HostParams()["music.timeZone"].(string)
 	a.location = deviceLocation(zone)
 	a.local = local.New(dir)
+	a.saf = newAndroidSAFStore(cx, a.post)
+	if a.saf != nil {
+		a.local.SetTreeStore(a.saf)
+	}
 	a.local.OnChange(func() {
 		a.post(func() {
 			if a.source() == a.local {
@@ -1121,8 +1127,29 @@ func (a *app) pickFolders() {
 }
 
 func (a *app) pickFoldersStable() {
-	if a.importing {
+	if a.importing || a.pickingSAF {
 		a.say(i18n.T("Importing music…"))
+		return
+	}
+	if a.saf != nil {
+		a.pickingSAF = true
+		a.saf.Pick(func(uri, name string, cancelled bool, err error) {
+			a.pickingSAF = false
+			if err != nil {
+				a.say(err.Error())
+				return
+			}
+			if cancelled || uri == "" {
+				return
+			}
+			a.local.AddTreeFolder(uri, name)
+			a.reload()
+			if !a.settingsInMain && a.source() == a.local {
+				a.open(route{page: pageBrowse, id: "songs"})
+			}
+			a.say(i18n.T("Scanning folder…"))
+			a.bump()
+		})
 		return
 	}
 	a.cx.PickDirectories(core.PickDirectoriesOptions{Multiple: true}, func(dirs []core.Directory, err error) {
