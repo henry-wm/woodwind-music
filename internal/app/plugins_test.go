@@ -128,6 +128,22 @@ func TestPhonePluginInstallReviewAndRemove(t *testing.T) {
 	}
 }
 
+func TestPhonePluginCatalog(t *testing.T) {
+	ui, _ := startPhone(t)
+	ui.Press("id:phone-tab-library")
+	ui.Press("id:open-settings")
+	ui.Press("id:phone-settings-plugins")
+	ui.Find("id:plugin-install")
+	for _, id := range []string{"kugou-lite", "bilibili"} {
+		for _, action := range []string{"repo", "license", "install"} {
+			testID := "plugin-catalog-" + action + "-" + id
+			if height := ui.Find("id:" + testID).Frame.Size.Height; height < 48 {
+				t.Errorf("%s has a %g-point touch target, want at least 48", testID, height)
+			}
+		}
+	}
+}
+
 func TestPluginOldSearchCannotReplaceNewSource(t *testing.T) {
 	ui, a := startPhone(t)
 	// A real async JS plugin deliberately finishes after switching sources.

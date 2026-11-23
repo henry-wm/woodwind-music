@@ -195,6 +195,7 @@ func (a *app) pluginCategories() settingsCatDef {
 	groups := []settingsGroupDef{{rows: []settingsRowDef{{label: i18n.T("Install a Plugin"), sub: i18n.T("Install from GitHub or a ZIP file"), control: func(p palette) core.Node {
 		return a.settingsAction(p, i18n.T("Install"), "plugin-install", a.installer.busy, a.beginInstall)
 	}}}}}
+	groups = append(groups, a.pluginCatalog())
 	for _, plug := range a.plugins {
 		p := plug
 		info := p.Info()

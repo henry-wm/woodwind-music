@@ -3,7 +3,7 @@
 //
 //	{
 //	  "id": "example", "name": "Example", "main": "index.js", "playback": "stream",
-//	  "minAppVersion": "0.1.8",
+//	  "minWoodwindVersion": "0.1.0",
 //	  "permissions": {"network": ["api.example.com"], "process": ["bin/helper-*", "ffmpeg"]}
 //	}
 //
@@ -127,11 +127,11 @@ func (ps Programs) Allows(dir, command string) bool {
 type Manifest struct {
 	music.Info
 	Main string `json:"main,omitempty"`
-	// MinAppVersion is the oldest version of the app the plugin works with,
-	// such as 0.1.8. An older one won't install it, or load it.
-	MinAppVersion  string           `json:"minAppVersion,omitempty"`
-	Permissions    Permissions      `json:"permissions"`
-	RequestHeaders []RequestHeaders `json:"requestHeaders,omitempty"`
+	// MinWoodwindVersion is the oldest Woodwind Music version the plugin
+	// supports. Upstream minAppVersion refers to the original host.
+	MinWoodwindVersion string           `json:"minWoodwindVersion,omitempty"`
+	Permissions        Permissions      `json:"permissions"`
+	RequestHeaders     []RequestHeaders `json:"requestHeaders,omitempty"`
 }
 
 // appVersion is the app's version, which the app sets. With none, as when
@@ -149,7 +149,7 @@ type NeedsNewerApp struct {
 }
 
 func (e *NeedsNewerApp) Error() string {
-	return fmt.Sprintf("%s needs wood wind music %s or later", e.Plugin, e.Version)
+	return i18n.Tf("%s requires Woodwind Music %s or later", e.Plugin, e.Version)
 }
 
 // Plugin is a music.Source in JavaScript. It starts on first use, and again on
@@ -210,12 +210,12 @@ func Load(dir, dataDir string) (*Plugin, error) {
 	if m.Main == "" {
 		m.Main = "index.js"
 	}
-	if m.MinAppVersion != "" {
-		if _, ok := versionNumbers(m.MinAppVersion); !ok {
-			return nil, fmt.Errorf("%s: minAppVersion isn't a version such as 0.1.8: %q", dir, m.MinAppVersion)
+	if m.MinWoodwindVersion != "" {
+		if _, ok := versionNumbers(m.MinWoodwindVersion); !ok {
+			return nil, fmt.Errorf("%s: invalid minWoodwindVersion %q", dir, m.MinWoodwindVersion)
 		}
-		if _, ok := versionNumbers(appVersion); ok && IsNewer(m.MinAppVersion, appVersion) {
-			return nil, &NeedsNewerApp{Plugin: m.Name, Version: m.MinAppVersion}
+		if _, ok := versionNumbers(appVersion); ok && IsNewer(m.MinWoodwindVersion, appVersion) {
+			return nil, &NeedsNewerApp{Plugin: m.Name, Version: m.MinWoodwindVersion}
 		}
 	}
 	if err := checkRequestHeaders(&m); err != nil {

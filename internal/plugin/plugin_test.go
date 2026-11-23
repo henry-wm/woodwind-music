@@ -654,9 +654,9 @@ export function signIn() {
 
 // A plugin that needs a newer app than this doesn't load, so it can't be
 // installed either; with no version of its own, as in development, it does.
-func TestMinAppVersion(t *testing.T) {
+func TestMinWoodwindVersion(t *testing.T) {
 	defer SetAppVersion(appVersion)
-	dir, data := write(t, `{"id":"x","name":"X","minAppVersion":"0.1.10"}`, `export function suggest() { return []; }`)
+	dir, data := write(t, `{"id":"x","name":"X","minWoodwindVersion":"0.1.10","minAppVersion":"9.0.0"}`, `export function suggest() { return []; }`)
 	for _, c := range []struct {
 		app   string
 		loads bool
@@ -675,9 +675,9 @@ func TestMinAppVersion(t *testing.T) {
 		}
 	}
 	SetAppVersion("1.0.0")
-	bad, data := write(t, `{"id":"x","minAppVersion":"soon"}`, `export function suggest() { return []; }`)
+	bad, data := write(t, `{"id":"x","minWoodwindVersion":"soon"}`, `export function suggest() { return []; }`)
 	if _, err := Load(bad, data); err == nil {
-		t.Error("loaded with a minAppVersion that isn't a version")
+		t.Error("loaded with a minWoodwindVersion that isn't a version")
 	}
 }
 

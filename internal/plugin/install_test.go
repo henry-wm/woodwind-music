@@ -157,6 +157,53 @@ func TestInstallFromRelease(t *testing.T) {
 	}
 }
 
+func TestFetchPinned(t *testing.T) {
+	defer SetAppVersion(appVersion)
+	SetAppVersion("0.1.0")
+	const commit = "b964ac03274163d3bf64bb530a452332be244635"
+	g := &github{tag: "v2.0.0", archive: makeZip(t,
+		zipped{name: "owner-repo/plugin.json", body: `{"id":"good","version":"1.0.0","minAppVersion":"0.1.20"}`},
+		zipped{name: "owner-repo/index.js", body: `export function search() { return {}; }`},
+	)}
+	g.start(t)
+	dir := t.TempDir()
+	for _, test := range []struct{ id, version string }{
+		{id: "wrong", version: "1.0.0"},
+		{id: "good", version: "1.0.1"},
+	} {
+		if _, err := FetchPinned("owner/repo", commit, test.id, test.version, dir); err == nil {
+			t.Fatalf("accepted mismatched manifest for %s %s", test.id, test.version)
+		}
+		if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+			t.Fatalf("left files after rejecting a manifest: %v, %v", entries, err)
+		}
+	}
+	p, err := FetchPinned("owner/repo", commit, "good", "1.0.0", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Discard()
+	for _, req := range g.got {
+		if req.path != "/repos/owner/repo/zipball/"+commit {
+			t.Fatalf("requested %s instead of the reviewed commit", req.path)
+		}
+	}
+	if found := Discover(dir, t.TempDir()); len(found) != 0 {
+		t.Fatal("catalog plugin became available before confirmation")
+	}
+	if err := p.Install(dir); err != nil {
+		t.Fatal(err)
+	}
+	found := Discover(dir, t.TempDir())
+	if len(found) != 1 || !found[0].Can("search") {
+		t.Fatalf("catalog plugin was not loaded on discovery: %v", found)
+	}
+	defer found[0].Close()
+	if origin := found[0].Origin(); origin == nil || *origin != (Origin{Repo: "owner/repo", Version: "1.0.0"}) {
+		t.Fatalf("catalog plugin origin: %+v", origin)
+	}
+}
+
 // Without a release, it's the latest commit, by which it updates too.
 func TestInstallFromCommit(t *testing.T) {
 	g := &github{sha: "0123456789abcdef0123", archive: goodArchive(t, "owner-repo-0123/")}

@@ -78,6 +78,7 @@ var (
 var (
 	repoName   = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	pluginName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+	commitSHA  = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
 // ParseRepo reads a repository as the listener may write it: owner/repo, or its
@@ -179,7 +180,7 @@ func githubSend(url, accept string) (*http.Response, error) {
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("User-Agent", "mygo-music")
+		req.Header.Set("User-Agent", "woodwind-music")
 		if accept != "" {
 			req.Header.Set("Accept", accept)
 		}
@@ -292,6 +293,31 @@ func Fetch(repo, dir string) (*Pending, error) {
 		return nil, err
 	}
 	return FetchRelease(rel, dir)
+}
+
+// FetchPinned downloads the source for a catalog entry at its reviewed commit
+// and checks the manifest against that entry before showing the install prompt.
+func FetchPinned(repo, commit, id, version, dir string) (*Pending, error) {
+	repo, err := ParseRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	if !commitSHA.MatchString(commit) {
+		return nil, fmt.Errorf("invalid GitHub commit %q", commit)
+	}
+	p, err := FetchRelease(&Release{
+		Repo:    repo,
+		Version: version,
+		url:     githubAPI + "/repos/" + repo + "/zipball/" + commit,
+	}, dir)
+	if err != nil {
+		return nil, err
+	}
+	if p.Manifest.ID != id || p.Manifest.Version != version {
+		p.Discard()
+		return nil, fmt.Errorf("%s: expected plugin %s %s, got %s %s", repo, id, version, p.Manifest.ID, p.Manifest.Version)
+	}
+	return p, nil
 }
 
 // FetchRelease is Fetch of a release Latest found already, without asking GitHub
