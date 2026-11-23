@@ -210,7 +210,7 @@ Windows 便携版表示无需安装，它与安装版仍共用当前用户的应
 
 需要 **Go 1.27.3 或更高版本**。NSGo 通过 Go Modules 获取，版本固定为 [`go.mod`](go.mod) 中的 **v0.3.0**，无需单独克隆框架。
 
-当前桌面端继续使用项目自带的 PCM 音频引擎，安卓继续使用 `core.Video` 与本项目后台播放宿主。NSGo v0.3.0 提供原生音频输出和长音频播放器。项目仍使用现有的播放引擎和 Android 后台播放宿主。
+macOS 和 Windows 通过 NSGo 原生设备播放 PCM，解码、混音、响度、保音调倍速和频谱由项目的音频引擎处理。安卓使用 `core.Video` 和项目的后台播放宿主，已存音乐通过 NSGo 的系统网络状态控制 Wi‑Fi 下载。
 
 ```sh
 git clone https://github.com/HengWh/woodwind-music.git

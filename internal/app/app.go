@@ -17,6 +17,7 @@ import (
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/desktop"
 
+	"github.com/HengWh/woodwind-music/internal/audio"
 	"github.com/HengWh/woodwind-music/internal/desktoplyrics"
 	"github.com/HengWh/woodwind-music/internal/i18n"
 	"github.com/HengWh/woodwind-music/internal/local"
@@ -38,6 +39,7 @@ func Run() error {
 	defer nowplaying.Shutdown()
 	nsgo.Run(func(cx *core.Scope) {
 		desktop.SetShutdownMode(cx, desktop.ShutdownOnExplicit)
+		audio.BindDesktopOutput(cx)
 		a := newApp(cx)
 		a.openMain = func() {
 			before := desktop.MainWindow(cx)

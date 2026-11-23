@@ -17,6 +17,11 @@ type device interface {
 	close()
 }
 
+// outputClock reports mixed frames still waiting to reach a device.
+type outputClock interface {
+	pendingFrames() int64
+}
+
 // idleClose is how long the output stays open with nothing playing.
 const idleClose = 5 * time.Second
 
@@ -50,11 +55,15 @@ func active() bool {
 // mixFor mixes into buf for an output open at latency lat, and reports
 // whether anything plays; ok is false, and it mixes nothing, once tests
 // mix by hand or the latency changed.
-func mixFor(buf []float32, lat Latency) (busy, ok bool) {
+func mixFor(buf []float32, lat Latency, pending int64) (busy, ok bool) {
 	mu.Lock()
 	defer mu.Unlock()
 	if testMode || latency != lat {
 		return false, false
+	}
+	if pending >= 0 {
+		unheard = min(mixed, pending)
+		held = unheard + int64(len(buf)/channels)
 	}
 	return mixLocked(buf), true
 }
@@ -85,13 +94,23 @@ func run() {
 		buf := make([]float32, n*channels)
 		idle := time.Duration(0)
 		per := frames(int64(n), sampleRate)
+		clock, _ := dev.(outputClock)
 		for {
-			busy, ok := mixFor(buf, lat)
+			pending := int64(-1)
+			if clock != nil {
+				pending = clock.pendingFrames()
+			}
+			busy, ok := mixFor(buf, lat, pending)
 			if !ok {
 				break
 			}
 			if err := dev.write(buf); err != nil {
-				// Lost, or a null device trying the real one again.
+				// A failed device may restart immediately. Pace the dropped
+				// frames so repeated start errors don't skip through a track.
+				if clock != nil {
+					setErr(err)
+					time.Sleep(per)
+				}
 				break
 			}
 			if busy {
