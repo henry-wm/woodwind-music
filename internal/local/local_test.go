@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1454,5 +1455,49 @@ func TestWAVWithID3(t *testing.T) {
 	s := scanned(t, dir)
 	if tr := songNamed(t, s, "From ID3"); tr.ArtistNames() != "Tagger" || tr.Duration != 1000 {
 		t.Errorf("track: %+v", tr)
+	}
+}
+
+func TestCloseStopsDiskWrites(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	musicDir := t.TempDir()
+	write(t, filepath.Join(musicDir, "song.wav"), wavWith([2]string{"INAM", "Waves"}))
+
+	s := New(dataDir)
+	s.AddFolders(musicDir)
+	wait(t, s)
+	tr := songNamed(t, s, "Waves")
+
+	// Simulate concurrent background record/read work racing with shutdown.
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 25 {
+				s.Played(tr)
+				_, _ = s.Stream(tr.ID, "high")
+				_, _ = s.Lyrics(tr.ID)
+			}
+		}()
+	}
+	s.Rescan()
+	s.Close()
+	if err := os.RemoveAll(dataDir); err != nil {
+		t.Fatalf("remove data dir after Close: %v", err)
+	}
+	wg.Wait()
+
+	// Late calls after Close must not recreate the removed data directory.
+	s.Played(tr)
+	if err := s.Like(tr.ID, true); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("Like after Close = %v, want os.ErrClosed", err)
+	}
+	s.Rescan()
+	if _, err := s.Stream(tr.ID, "high"); !errors.Is(err, music.ErrUnavailable) {
+		t.Fatalf("Stream after Close = %v, want ErrUnavailable", err)
+	}
+	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
+		t.Fatalf("data dir reappeared after Close: %v", err)
 	}
 }

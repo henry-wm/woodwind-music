@@ -270,6 +270,7 @@ func TestTreeStoreDirectScanLyricsCoverStreamAndSync(t *testing.T) {
 	store.add(treeURI, treeDir)
 
 	s := New(dataDir)
+	t.Cleanup(s.Close)
 	s.SetTreeStore(store)
 	s.AddTreeFolder(treeURI, "Music/Albums")
 	waitScan(t, s)
@@ -339,6 +340,7 @@ func TestTreeStoreDirectScanLyricsCoverStreamAndSync(t *testing.T) {
 	}
 	opensBefore := store.openCalls.Load()
 	s2 := New(dataDir)
+	t.Cleanup(s2.Close)
 	s2.SetTreeStore(store)
 	if s2.TrackCount() != 2 {
 		t.Fatalf("reloaded TrackCount = %d, want 2", s2.TrackCount())

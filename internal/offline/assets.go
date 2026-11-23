@@ -187,6 +187,10 @@ func (s *Store) Lyrics(t music.Track) (*music.Lyrics, bool) {
 // Reconcile reports externally removed audio without silently redownloading it.
 func (s *Store) Reconcile() {
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
 	for _, r := range s.records {
 		next := clone(r)
 		out := next.Variants[:0]

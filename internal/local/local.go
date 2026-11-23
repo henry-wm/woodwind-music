@@ -83,7 +83,43 @@ type Source struct {
 	// saveMu keeps writes of library.json in order, without holding up mu.
 	saveMu sync.Mutex
 	saved  int64 // which change library.json holds
+
+	// closed and ioMu serialize local disk work against Close so no file
+	// writes or open handles outlive shutdown. ioMu is a leaf lock.
+	closed atomic.Bool
+	ioMu   sync.RWMutex
 }
+
+// Close stops any scan under way and waits for in-flight disk work to finish.
+// Later calls do not touch the library directory or open track files.
+func (s *Source) Close() {
+	s.mu.Lock()
+	s.closed.Store(true)
+	s.onChange = nil
+	cancel, done := s.cancelScan, s.scanDone
+	s.cancelScan, s.scanDone = nil, nil
+	s.scanning = false
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		<-done
+	}
+	s.ioMu.Lock()
+	s.ioMu.Unlock()
+}
+
+func (s *Source) beginIO() bool {
+	s.ioMu.RLock()
+	if s.closed.Load() {
+		s.ioMu.RUnlock()
+		return false
+	}
+	return true
+}
+
+func (s *Source) endIO() { s.ioMu.RUnlock() }
 
 // New returns the source keeping its data in dataDir, listing what the last
 // scan found. It doesn't scan: see Rescan.
@@ -109,6 +145,9 @@ func (s *Source) OnChange(fn func()) {
 }
 
 func (s *Source) notify() {
+	if s.closed.Load() {
+		return
+	}
 	s.mu.RLock()
 	fn := s.onChange
 	s.mu.RUnlock()
@@ -241,7 +280,12 @@ func (s *Source) changeFolders(fn func([]string) []string) {
 		return nil
 	}, false)
 	if err != nil {
-		log.Printf("local: saving library: %v", err)
+		if !errors.Is(err, os.ErrClosed) {
+			log.Printf("local: saving library: %v", err)
+		}
+		if errors.Is(err, os.ErrClosed) {
+			return
+		}
 	}
 	s.Rescan()
 	s.notify()
@@ -470,7 +514,7 @@ func (s *Source) Played(track music.Track) {
 		s.lib.Recent = recent[:min(len(recent), keepRecent)]
 		return nil
 	}, true)
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrClosed) {
 		log.Printf("local: saving library: %v", err)
 	}
 }
@@ -641,25 +685,43 @@ const (
 // Lyrics answers the .lrc beside the file, or else what's in its tags if it's
 // timed: plain words can't follow the song.
 func (s *Source) Lyrics(id string) (*music.Lyrics, error) {
+	if s.closed.Load() {
+		return &music.Lyrics{}, nil
+	}
 	it, ok := s.cat.Load().byID[id]
 	if !ok {
 		return nil, music.ErrUnavailable
 	}
 	if it.TreeURI != "" {
-		return s.treeLyrics(it), nil
+		if l, ok := s.treeLyrics(it); ok {
+			return l, nil
+		}
+	} else if l, ok := s.fileLyrics(it); ok {
+		return l, nil
 	}
+	if s.closed.Load() {
+		return &music.Lyrics{}, nil
+	}
+	return s.companionLyrics(it), nil
+}
+
+func (s *Source) fileLyrics(it *item) (*music.Lyrics, bool) {
+	if !s.beginIO() {
+		return &music.Lyrics{}, true
+	}
+	defer s.endIO()
 	base := strings.TrimSuffix(it.Path, filepath.Ext(it.Path))
 	for _, ext := range []string{".lrc", ".LRC"} {
 		if b, err := os.ReadFile(base + ext); err == nil {
 			l := &music.Lyrics{LRC: strings.TrimPrefix(string(b), "\xef\xbb\xbf")}
 			if len(lyrics.FromSource(l)) > 0 {
-				return l, nil
+				return l, true
 			}
 		}
 	}
 	f, err := os.Open(it.Path)
 	if err != nil {
-		return &music.Lyrics{}, nil
+		return &music.Lyrics{}, true
 	}
 	defer f.Close()
 	var size int64
@@ -668,18 +730,22 @@ func (s *Source) Lyrics(id string) (*music.Lyrics, error) {
 	}
 	tags := readTags(f, it.Path, fileType(f, it.Path), size)
 	if l := (&music.Lyrics{LRC: tags.lyrics}); len(lyrics.FromSource(l)) > 0 {
-		return l, nil
+		return l, true
 	}
-	return s.companionLyrics(it), nil
+	return nil, false
 }
 
-func (s *Source) treeLyrics(it *item) *music.Lyrics {
+func (s *Source) treeLyrics(it *item) (*music.Lyrics, bool) {
+	if !s.beginIO() {
+		return &music.Lyrics{}, true
+	}
+	defer s.endIO()
 	trees := s.treeStore()
 	if trees != nil && it.LyricsID != "" {
 		if b, err := trees.ReadFile(context.Background(), it.TreeURI, it.LyricsID, maxTreeLyricsBytes); err == nil {
 			l := &music.Lyrics{LRC: strings.TrimPrefix(string(b), "\xef\xbb\xbf")}
 			if len(lyrics.FromSource(l)) > 0 {
-				return l
+				return l, true
 			}
 		}
 	}
@@ -688,15 +754,19 @@ func (s *Source) treeLyrics(it *item) *music.Lyrics {
 			tags := readTags(f, it.Path, fileType(f, it.Path), it.Size)
 			_ = f.Close()
 			if l := (&music.Lyrics{LRC: tags.lyrics}); len(lyrics.FromSource(l)) > 0 {
-				return l
+				return l, true
 			}
 		}
 	}
-	return s.companionLyrics(it)
+	return nil, false
 }
 
 // Stream answers the file itself. The quality asked for doesn't come into it.
 func (s *Source) Stream(id, quality string) (*music.Stream, error) {
+	if !s.beginIO() {
+		return nil, music.ErrUnavailable
+	}
+	defer s.endIO()
 	it, ok := s.cat.Load().byID[id]
 	if !ok {
 		return nil, music.ErrUnavailable
@@ -819,6 +889,10 @@ func (s *Source) changePlaylist(id string, fn func(*playlist) error) error {
 // disk. Of changes made at once, the last one's write holds them all.
 func (s *Source) change(fn func() error, notify bool) error {
 	s.mu.Lock()
+	if s.closed.Load() {
+		s.mu.Unlock()
+		return os.ErrClosed
+	}
 	if err := fn(); err != nil {
 		s.mu.Unlock()
 		return err
@@ -830,13 +904,19 @@ func (s *Source) change(fn func() error, notify bool) error {
 	if err == nil {
 		s.saveMu.Lock()
 		if seq > s.saved {
-			if err = writeAtomic(s.libraryPath(), b); err == nil {
+			if !s.beginIO() {
+				s.saveMu.Unlock()
+				return os.ErrClosed
+			}
+			err = writeAtomic(s.libraryPath(), b)
+			s.endIO()
+			if err == nil {
 				s.saved = seq
 			}
 		}
 		s.saveMu.Unlock()
 	}
-	if notify {
+	if notify && err == nil {
 		s.notify()
 	}
 	return err
