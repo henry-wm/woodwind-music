@@ -32,7 +32,7 @@ func TestAndroidImportAndNativePlayback(t *testing.T) {
 		t.Fatal("Android did not select native playback")
 	}
 	app.Find("id:phone-header")
-	app.PickDirectories = func(core.DirectoriesRequest) []core.Directory {
+	app.PickDirectories = func(nsgotest.DirectoryPick) []core.Directory {
 		return []core.Directory{{Name: "Music", FS: os.DirFS(musicDir)}}
 	}
 	app.Press("id:phone-add-folder")

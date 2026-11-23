@@ -16,6 +16,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 SLUG = "wood-wind-music"
 ICONS = {"icon.png", "icon-dev.png", "icon.icns"}
+THIRD_PARTY_NOTICES = "THIRD_PARTY_NOTICES.txt"
 
 
 def checksum(path):
@@ -49,7 +50,7 @@ def main():
         entries = set(archive.namelist())
         allowed = {"AndroidManifest.xml", "resources.arsc", "classes.dex", "lib/arm64-v8a/libnsgo.so", "res/drawable/icon.png", "res/xml/network_security_config.xml"}
         signatures = {"META-INF/KEY.RSA", "META-INF/KEY.SF", "META-INF/MANIFEST.MF"}
-        allowed |= {f"assets/{icon}" for icon in ICONS}
+        allowed |= {f"assets/{icon}" for icon in ICONS | {THIRD_PARTY_NOTICES}}
         require(len(entries) == len(archive.namelist()), "Duplicate APK entries")
         require(allowed <= entries and entries <= allowed | signatures, f"Unexpected or missing APK entries: {sorted((entries - allowed - signatures) | (allowed - entries))}")
         for icon in ICONS:
@@ -58,7 +59,7 @@ def main():
 
     app = output / f"{name}-{version}-macos_arm64" / f"{name}.app"
     allowed_app = {"Contents/Info.plist", f"Contents/MacOS/{name}", "Contents/_CodeSignature/CodeResources"}
-    allowed_app |= {f"Contents/Resources/{icon}" for icon in ICONS | {"AppIcon.icns"}}
+    allowed_app |= {f"Contents/Resources/{name}" for name in ICONS | {"AppIcon.icns", "PrivacyInfo.xcprivacy", THIRD_PARTY_NOTICES}}
     app_entries = {p.relative_to(app).as_posix() for p in app.rglob("*") if p.is_file()}
     require(app_entries == allowed_app, f"Unexpected or missing macOS app entries: {sorted(app_entries ^ allowed_app)}")
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
@@ -67,7 +68,7 @@ def main():
 
     portable = release / f"{SLUG}-{version}-windows-x64-portable.zip"
     with zipfile.ZipFile(portable) as archive:
-        allowed = ICONS | {f"{name}.exe", "LICENSE", "NOTICE", "docs/WINDOWS.md"}
+        allowed = ICONS | {f"{name}.exe", "LICENSE", "NOTICE", "docs/WINDOWS.md", THIRD_PARTY_NOTICES}
         allowed |= {p.relative_to(ROOT).as_posix() for p in (ROOT / "LICENSES").rglob("*") if p.is_file()}
         require(set(archive.namelist()) == allowed, "Unexpected Windows portable contents")
         for icon in ICONS:

@@ -172,40 +172,14 @@ func TestDailyUIShots(t *testing.T) {
 // Run creates the app outside its main window; using that app scope's zero width hid the cover stack.
 func TestDailyUsesMainWindowSize(t *testing.T) {
 	t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", t.TempDir())
-	root := core.NewRoot(core.RootOptions{Post: func(func()) {}, Clock: core.NewManualClock(time.Unix(0, 0)), Windows: &core.WindowOptions{Width: 1180, Height: 780}})
-	defer root.Dispose()
-	application := core.NewTree(root, core.ApproxTextEngine{})
-	application.SetEnvironment(core.Environment{OS: core.OSMacOS, Locale: "en", Idiom: core.IdiomDesktop})
-	application.Mount(core.AppRoot(func(cx *core.Scope) {
+	ui := nsgotest.StartApp(t, func(cx *core.Scope) {
 		a := newApp(cx)
 		sec := music.Section{Title: "Recently Played", Tracks: []music.Track{{ID: "one"}, {ID: "two"}, {ID: "three"}}}
 		a.home = &music.Browse{Sections: []music.Section{sec}}
 		cx.SetMainView(func(cx *core.Scope) core.Node { return a.featureCard(a.palette(cx), sec, "", 0, time.Unix(0, 0)) })
-	}))
-	application.Commit()
-	if len(application.Surfaces()) != 1 {
-		t.Fatal("the app did not open its main window")
-	}
-	window := application.Surfaces()[0]
-	stackMounted := func() bool {
-		batch := window.Commit()
-		if batch == nil {
-			return false
-		}
-		for _, item := range batch.Items {
-			if item.ViewProps != nil && item.ViewProps.TestID == "daily-stack" {
-				return true
-			}
-		}
-		return false
-	}
-	if !stackMounted() {
-		t.Fatal("the cover stack was hidden in a 1180-point main window while the app scope had zero width")
-	}
-	window.Resize(core.Size{Width: 880, Height: 780}, core.Geometry{})
-	window.Commit()
-	window.Resize(core.Size{Width: 1180, Height: 780}, core.Geometry{})
-	if !stackMounted() {
-		t.Fatal("widening the main window did not restore the cover stack")
-	}
+	}, nsgotest.Environment(core.Environment{OS: core.OSMacOS, Locale: "en", Idiom: core.IdiomDesktop}), nsgotest.Size(1180, 780))
+	ui.Find("id:daily-stack")
+	ui.Resize(880, 780)
+	ui.Resize(1180, 780)
+	ui.Find("id:daily-stack")
 }

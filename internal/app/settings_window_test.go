@@ -1,9 +1,7 @@
 package app
 
 import (
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/desktop"
@@ -14,68 +12,15 @@ import (
 // the desktop window lifetime through the real sidebar button and redraws.
 func TestSettingsWindowSurvivesSidebarUpdates(t *testing.T) {
 	t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", t.TempDir())
-	var mu sync.Mutex
-	var posts []func()
-	root := core.NewRoot(core.RootOptions{
-		Post:    func(fn func()) { mu.Lock(); posts = append(posts, fn); mu.Unlock() },
-		Clock:   core.NewManualClock(time.Unix(0, 0)),
-		Windows: &core.WindowOptions{Width: 1180, Height: 780},
-	})
-	t.Cleanup(root.Dispose)
-	tree := core.NewTree(root, core.ApproxTextEngine{})
 	var a *app
-	tree.Mount(core.AppRoot(func(cx *core.Scope) {
+	ui := nsgotest.StartApp(t, func(cx *core.Scope) {
 		desktop.SetShutdownMode(cx, desktop.ShutdownOnExplicit)
 		a = newApp(cx)
 		cx.SetMainView(a.view)
-	}))
-	ids := map[string]core.NodeID{}
-	closeKeys := map[*core.Tree]uint32{}
-	flush := func() {
-		for range 100 {
-			mu.Lock()
-			pending := posts
-			posts = nil
-			mu.Unlock()
-			for _, fn := range pending {
-				fn()
-			}
-			changed := len(pending) > 0
-			for _, surface := range append([]*core.Tree{tree}, tree.Surfaces()...) {
-				if surface.Closed() {
-					surface.Forget()
-					continue
-				}
-				if batch := surface.Commit(); batch != nil {
-					changed = true
-					for _, item := range batch.Items {
-						for _, binding := range item.Keys {
-							if binding.Key == "mod+w" {
-								closeKeys[surface] = binding.ID
-							}
-						}
-						if item.ViewProps != nil && item.ViewProps.TestID != "" {
-							ids[item.ViewProps.TestID] = item.ID
-						}
-					}
-				}
-			}
-			if !changed {
-				return
-			}
-		}
-		t.Fatal("the window did not settle")
-	}
-	flush()
-	main := tree.Surfaces()[0]
+	}, nsgotest.Environment(core.Environment{OS: core.OSMacOS}), nsgotest.Size(1180, 780))
 	pressSettings := func() {
 		t.Helper()
-		id := ids["open-settings"]
-		if id == 0 {
-			t.Fatal("no settings button")
-		}
-		main.Dispatch(nsgotest.Event{Kind: nsgotest.EventPress, ID: id})
-		flush()
+		ui.Press("id:open-settings")
 		if a.settingsWin == nil || a.settingsWin.Closed() || !a.settingsWin.Visible() {
 			t.Fatal("clicking Settings did not leave a visible settings window")
 		}
@@ -83,33 +28,24 @@ func TestSettingsWindowSurvivesSidebarUpdates(t *testing.T) {
 	pressSettings()
 	first := a.settingsWin
 	a.post(a.bump)
-	flush()
+	ui.Settle()
 	if first.Closed() {
 		t.Fatal("a sidebar update closed the settings window")
 	}
 	first.Hide()
 	pressSettings()
-	if a.settingsWin != first || len(tree.Surfaces()) != 2 {
+	if a.settingsWin != first || len(ui.Surfaces()) != 2 {
 		t.Fatal("opening Settings again did not reuse its window")
 	}
 	// Closing with the settings window's shortcut must allow opening a fresh
 	// window from the button, without retaining old surfaces.
-	for _, surface := range tree.Surfaces() {
-		if surface != main {
-			// NSGo dispatches the binding ID matched by the platform's keymap.
-			id := closeKeys[surface]
-			if id == 0 {
-				t.Fatal("the settings window has no close shortcut")
-			}
-			surface.Dispatch(nsgotest.Event{Kind: nsgotest.EventKey, Count: id})
-		}
-	}
-	flush()
+	ui.Surface("index:1").Key("mod+w")
+	ui.Settle()
 	if !first.Closed() {
 		t.Fatal("the settings window did not close")
 	}
 	pressSettings()
-	if a.settingsWin == first || len(tree.Surfaces()) != 2 {
+	if a.settingsWin == first || len(ui.Surfaces()) != 2 {
 		t.Fatal("Settings did not reopen as a new window")
 	}
 }

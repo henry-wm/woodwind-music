@@ -15,20 +15,18 @@ import (
 // Exercise the real NSGo surface protocol without a native host. No build tag
 // substitutes for the implementation under test, and no device is opened.
 type panelFixture struct {
-	root       *core.Scope
-	tree       *core.Tree
-	window     *panelWindow
-	ids        map[string]core.NodeID
-	opened     []nsgotest.SurfaceConfig
-	commands   []core.WindowCommand
-	drawing    *core.Drawing
-	background core.Color
-	posts      []func()
+	root           *core.Scope
+	tree           *core.Tree
+	window         *panelWindow
+	initialPointer desktop.WindowPointerEvents
+	lastPointer    desktop.WindowPointerEvents
+	frame          desktop.WindowFrame
+	posts          []func()
 }
 
 func newPanelFixture(t *testing.T, os core.OS, initial Frame) *panelFixture {
 	t.Helper()
-	f := &panelFixture{ids: map[string]core.NodeID{}}
+	f := new(panelFixture)
 	f.root = core.NewRoot(core.RootOptions{Post: func(fn func()) { f.posts = append(f.posts, fn) }, Clock: core.NewManualClock(time.Unix(0, 0)), Windows: &core.WindowOptions{Width: 1180, Height: 780}})
 	t.Cleanup(f.root.Dispose)
 	f.tree = core.NewTree(f.root, core.ApproxTextEngine{})
@@ -62,19 +60,13 @@ func (f *panelFixture) flush(t *testing.T) {
 				changed = true
 				for _, item := range batch.Items {
 					if item.Surface != nil {
-						f.opened = append(f.opened, *item.Surface)
+						f.initialPointer = item.Surface.PointerEvents
 					}
 					if item.Window != nil {
-						f.commands = append(f.commands, *item.Window)
-					}
-					if item.ViewProps != nil && item.ViewProps.TestID != "" {
-						f.ids[item.ViewProps.TestID] = item.ID
-					}
-					if item.Drawing != nil {
-						f.drawing = item.Drawing
-					}
-					if item.ViewStyle != nil && item.ID == f.ids["desktop-lyrics-panel"] {
-						f.background = item.ViewStyle.Background
+						f.lastPointer = item.Window.PointerEvents
+						if item.Window.Frame.Move {
+							f.frame = item.Window.Frame
+						}
 					}
 				}
 			}
@@ -92,33 +84,37 @@ func TestPanelControlsPointerAndLifetime(t *testing.T) {
 	for _, os := range []core.OS{core.OSMacOS, core.OSWindows} {
 		t.Run(string(os), func(t *testing.T) {
 			initial := Frame{Words: []Word{{Text: "你好", Progress: .5}}, Secondary: "Hello", FontSize: 36, Color: 0xffc85a}
-			f := newPanelFixture(t, os, initial)
-			w := f.window
-			if len(f.opened) != 1 || f.opened[0].Kind != nsgotest.SurfacePanel || !f.opened[0].Transparent || !f.opened[0].NoActivate || f.opened[0].HideOnBlur {
-				t.Fatalf("lyrics must open as a persistent, transparent, nonactivating panel: %+v", f.opened)
+			var w *panelWindow
+			ui := nsgotest.StartApp(t, func(cx *core.Scope) {
+				panel, err := Open(cx, initial)
+				if err != nil {
+					t.Fatal(err)
+				}
+				w = panel.(*panelWindow)
+			}, nsgotest.Environment(core.Environment{OS: os, Displays: []core.DisplayInfo{display(0, 0, 1440, 900, 2, true)}}))
+			if opened := ui.Opened; len(opened) != 1 || opened[0].Kind != nsgotest.SurfacePanel || !opened[0].Transparent || !opened[0].NoActivate || opened[0].HideOnBlur {
+				t.Fatalf("lyrics must open as a persistent, transparent, nonactivating panel: %+v", opened)
 			}
-			if f.background&0xff != 0 || f.drawing == nil {
-				t.Fatalf("idle panel background=%#x, drawing=%v", f.background, f.drawing != nil)
+			surface := ui.Surface("index:0")
+			background := func() core.Color { return surface.FindMounted("id:desktop-lyrics-panel").Style.Background }
+			drawing := func() *core.Drawing { return surface.FindMounted("id:desktop-lyrics-text").Drawing }
+			if background()&0xff != 0 || drawing() == nil {
+				t.Fatalf("idle panel background=%#x, drawing=%v", background(), drawing() != nil)
 			}
 			if events := w.Poll(); len(events) != 0 {
 				t.Fatalf("unreported frame was saved: %+v", events)
 			}
-			original := f.drawing
+			original := drawing()
 			initial.Words[0].Text = "mutated"
 			if w.frame.Words[0].Text != "你好" {
 				t.Fatal("panel retained caller's mutable words")
 			}
-			f.surface().Dispatch(nsgotest.Event{Kind: nsgotest.EventMouseEnter, ID: f.ids["desktop-lyrics-panel"]})
-			f.flush(t)
-			if f.background&0xff == 0 {
+			surface.Report(nsgotest.Event{Kind: nsgotest.EventMouseEnter, ID: surface.FindMounted("id:desktop-lyrics-panel").ID})
+			if background()&0xff == 0 {
 				t.Fatal("hover did not reveal the toolbar background")
 			}
 			for _, id := range []string{"previous", "play", "next", "lock", "close"} {
-				node := f.ids["desktop-lyrics-"+id]
-				if node == 0 {
-					t.Fatalf("missing %s control on hover", id)
-				}
-				f.surface().Dispatch(nsgotest.Event{Kind: nsgotest.EventPress, ID: node})
+				surface.Press("id:desktop-lyrics-" + id)
 			}
 			var actions []Action
 			for _, e := range w.Poll() {
@@ -129,29 +125,22 @@ func TestPanelControlsPointerAndLifetime(t *testing.T) {
 			}
 			updated := Frame{Words: []Word{{Text: "再见", Progress: .75}}, Secondary: "Goodbye", FontSize: 48, Color: 0x63e6ff, Locked: true}
 			w.Update(updated)
-			f.flush(t)
-			if last := f.commands[len(f.commands)-1]; last.PointerEvents != desktop.WindowPointerNone {
-				t.Fatalf("lock did not pass pointer through: %+v", last)
-			}
-			if f.background&0xff != 0 || f.drawing == original {
+			ui.Settle()
+			if background()&0xff != 0 || drawing() == original {
 				t.Fatal("locked panel retained hover background or stale lyric drawing")
 			}
 			updated.Locked = false
 			w.Update(updated)
-			f.flush(t)
-			if last := f.commands[len(f.commands)-1]; last.PointerEvents != desktop.WindowPointerAuto {
-				t.Fatalf("external unlock failed: %+v", last)
-			}
-			if f.background&0xff != 0 {
+			ui.Settle()
+			if background()&0xff != 0 {
 				t.Fatal("unlock restored stale hover after click-through")
 			}
-			// Applying style changes keeps the same live panel.
-			if w.panel.Closed() || !w.panel.Visible() || len(f.opened) != 1 {
+			if w.panel.Closed() || !w.panel.Visible() || len(ui.Surfaces()) != 1 {
 				t.Fatal("style updates replaced or hid the panel")
 			}
 			w.Close()
-			f.flush(t)
-			if !w.panel.Closed() {
+			ui.Settle()
+			if !w.panel.Closed() || len(ui.Surfaces()) != 0 {
 				t.Fatal("Close did not destroy the NSGo panel")
 			}
 			w.Update(updated)
@@ -164,17 +153,21 @@ func TestPanelControlsPointerAndLifetime(t *testing.T) {
 
 func TestPanelRestoresLockAndReportsPositionInPoints(t *testing.T) {
 	f := newPanelFixture(t, core.OSWindows, Frame{Locked: true, Positioned: true, LegacyPixels: true, X: 246, Y: 912, FontSize: 36})
-	if f.opened[0].PointerEvents != desktop.WindowPointerNone {
+	if f.initialPointer != desktop.WindowPointerNone {
 		t.Fatal("restored panel briefly intercepts clicks")
 	}
-	var target desktop.WindowFrame
-	for _, c := range f.commands {
-		if c.Action == core.WindowSetFrame {
-			target = c.Frame
-		}
+	if f.frame.X != 123 || f.frame.Y != 456 {
+		t.Fatalf("legacy pixel position not converted: %+v", f.frame)
 	}
-	if target.X != 123 || target.Y != 456 {
-		t.Fatalf("legacy pixel position not converted: %+v", target)
+	f.window.Update(Frame{})
+	f.flush(t)
+	if f.lastPointer != desktop.WindowPointerAuto {
+		t.Fatalf("external unlock did not restore pointer events: %v", f.lastPointer)
+	}
+	f.window.Update(Frame{Locked: true})
+	f.flush(t)
+	if f.lastPointer != desktop.WindowPointerNone {
+		t.Fatalf("lock did not pass pointer through: %v", f.lastPointer)
 	}
 	env := core.Environment{OS: core.OSWindows, WindowTransparent: true, WindowFrame: desktop.WindowFrame{Move: true, X: 321, Y: 456, Width: 800, Height: 154}}
 	f.surface().SetEnvironment(env)
