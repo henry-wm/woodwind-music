@@ -5,7 +5,7 @@ import (
 	"math"
 )
 
-// Speeds are the supported pitch-preserving playback rates.
+// Speeds are the rates offered by the playback controls.
 func Speeds() []float64 { return []float64{0.5, 0.75, 1, 1.25, 1.5, 1.75, 2} }
 
 func normalizedSpeed(speed float64) float64 {
@@ -36,7 +36,7 @@ func (p *Player) Speed() float64 {
 	return normalizedSpeed(p.speed)
 }
 
-// SetSpeed changes tempo in place, retaining pitch, position and pause state.
+// SetSpeed changes the playback rate in place.
 func (p *Player) SetSpeed(speed float64) {
 	if !p.CanSetSpeed() || normalizedSpeed(speed) != speed {
 		return
@@ -50,9 +50,6 @@ func (p *Player) SetSpeed(speed float64) {
 }
 
 func (p *Player) applySpeed() {
-	if p.out != nil {
-		p.out.SetPreservesPitch(true).SetSpeed(p.Speed())
-	}
 	if p.Native != nil {
 		p.Native.SetSpeed(p.Speed())
 	}

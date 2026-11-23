@@ -96,6 +96,9 @@ func run() error {
 	}
 	if err == nil {
 		err = filepath.WalkDir("LICENSES", func(path string, d os.DirEntry, err error) error {
+			if path == "LICENSES" && os.IsNotExist(err) {
+				return nil
+			}
 			if err != nil || d.IsDir() {
 				return err
 			}

@@ -15,17 +15,32 @@ func (nativeSource) Stream(id, quality string) (*music.Stream, error) {
 	return &music.Stream{URL: "file:///music/" + id + ".mp3", Quality: quality}, nil
 }
 
+type fileSource struct {
+	nothing
+	path string
+}
+
+func (s fileSource) Info() music.Info { return music.Info{ID: "disk", Playback: music.PlaybackStream} }
+
+func (s fileSource) Stream(_ string, quality string) (*music.Stream, error) {
+	return &music.Stream{URL: music.FileURL(s.path), Type: "mp3", Quality: quality}, nil
+}
+
 type nativeOutput struct {
-	speed  float64
-	source string
-	paused bool
-	volume float64
-	seek   time.Duration
-	events NativeEvents
+	autoLoad bool
+	speed    float64
+	source   string
+	paused   bool
+	volume   float64
+	seek     time.Duration
+	events   NativeEvents
 }
 
 func (o *nativeOutput) Open(source string, paused bool, events NativeEvents) {
 	o.source, o.paused, o.events = source, paused, events
+	if o.autoLoad {
+		events.Loaded(0)
+	}
 }
 func (o *nativeOutput) SetSpeed(v float64)   { o.speed = v }
 func (o *nativeOutput) SetPaused(v bool)     { o.paused = v }
@@ -60,8 +75,8 @@ func TestNativeRestoreAndControls(t *testing.T) {
 	p, out, ch := newNativeTest()
 	p.Restore(Session{Queue: []music.Track{{ID: "one", Duration: 60000}}, Order: []int{0}, At: 0, Position: 12000})
 	nativeUntil(t, ch, func() bool { return out.source != "" })
-	if !out.paused || !p.Loading() || p.Ready() || p.out != nil || p.stream != nil {
-		t.Fatal("restore started playback or used the Go audio engine")
+	if !out.paused || !p.Loading() || p.Ready() {
+		t.Fatal("restore started playback before it was requested")
 	}
 	p.Seek(20 * time.Second) // a newer seek replaces the restored one during load
 	out.events.Loaded(90 * time.Second)

@@ -71,20 +71,6 @@ func TestSleepTimerReplacementCancellationAndClose(t *testing.T) {
 	}
 }
 
-func TestSleepTimerDesktopFade(t *testing.T) {
-	ch, p := posted()
-	defer p.Close()
-	p.SleepAfter(time.Hour)
-	p.expireSleepTimer(p.sleepGen)
-	if p.Playing() || !p.out.Playing() {
-		t.Fatal("sleep did not use pause fade")
-	}
-	next(t, ch)
-	if p.out.Playing() || p.Current() == nil {
-		t.Fatal("sleep did not pause the output and keep the track")
-	}
-}
-
 func TestSleepTimerNativeAndPaused(t *testing.T) {
 	p, out, ch := newNativeTest()
 	defer p.Close()

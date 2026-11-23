@@ -3,8 +3,6 @@ package player
 import (
 	"time"
 
-	"github.com/HengWh/woodwind-music/internal/audio"
-
 	"github.com/HengWh/woodwind-music/internal/lyrics"
 	"github.com/HengWh/woodwind-music/internal/music"
 )
@@ -32,13 +30,6 @@ func (p *Player) SetLyrics(lines []lyrics.Line) {
 // stays there.
 func (p *Player) Hold(pos time.Duration) {
 	p.pending = pos
-	p.playing = true
-}
-
-// Attach makes out the current track's audio, playing.
-func (p *Player) Attach(out *audio.Player) {
-	p.out = out
-	p.applySpeed()
 	p.playing = true
 }
 

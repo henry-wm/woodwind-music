@@ -5,10 +5,6 @@ This project is a derivative of MyGo Music (https://github.com/egoist/mygo-music
 Copyright (c) MyGo Music contributors, licensed under the GNU Affero General
 Public License, version 3. See LICENSE.
 
-The audio engine in internal/audio is taken from MyGo
-(https://github.com/egoist/mygo), Copyright (c) 2026 MyGo contributors,
-licensed under the MIT License. See LICENSES/MyGo-MIT.txt.
-
-The user interface is written against NSGo
+The user interface and native audio playback use NSGo
 (https://github.com/nsgo-dev/nsgo), Copyright the NSGo contributors,
 licensed under the Apache License, version 2.0.

@@ -2,54 +2,37 @@ package player
 
 import (
 	"math"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/HengWh/woodwind-music/internal/audio"
 	"github.com/HengWh/woodwind-music/internal/music"
 )
 
-func TestPlaybackSpeedDesktopLoadSeekAndRestore(t *testing.T) {
-	data, err := os.ReadFile("testdata/seek.mp3")
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "song.mp3")
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	ch := make(chan func(), 64)
-	p := New(func(fn func()) { ch <- fn })
+func TestPlaybackSpeedRestoresPausedSession(t *testing.T) {
+	p, output, ch := newNativeTest()
 	t.Cleanup(p.Close)
-	p.Source = func(string) music.Source { return fileSource{path: path} }
+	output.autoLoad = true
 	p.SetSpeed(1.5)
 	p.PlayQueue([]music.Track{{ID: "one"}, {ID: "two"}}, 0)
 	nativeUntil(t, ch, p.Ready)
-	if p.out.Speed() != 1.5 || !p.out.PreservesPitch() {
-		t.Fatal("loaded output lost pitch-preserving speed")
+	if output.speed != 1.5 {
+		t.Fatal("loaded output lost its playback rate")
 	}
 	p.Next()
 	nativeUntil(t, ch, p.Ready)
-	if p.out.Speed() != 1.5 {
+	if output.speed != 1.5 {
 		t.Fatal("track change reset speed")
 	}
-	// Pause directly to inspect a synchronous seek without fade timers.
-	p.playing = false
-	p.out.Pause()
+	p.TogglePlay()
 	p.Seek(time.Second)
 	p.SetSpeed(0.75)
-	if p.Playing() || p.out.Playing() || p.Position() != time.Second || p.out.Speed() != 0.75 {
-		t.Fatalf("speed changed paused transport: position=%v playing=%v", p.Position(), p.Playing())
-	}
 	session, ok := p.Session()
 	if !ok || session.Speed != 0.75 || session.Position != 1000 {
 		t.Fatalf("session: %+v", session)
 	}
 	p.Restore(session)
 	nativeUntil(t, ch, p.Ready)
-	if p.Speed() != 0.75 || p.out.Speed() != 0.75 || !p.out.PreservesPitch() || p.Playing() || p.Position() != time.Second {
+	if p.Speed() != 0.75 || output.speed != 0.75 || !output.paused || p.Playing() || p.Position() != time.Second {
 		t.Fatal("restore lost speed, pause state or source position")
 	}
 }
@@ -87,19 +70,18 @@ func TestPlaybackSpeedValidationAndRemote(t *testing.T) {
 	if p.Speed() != 1 {
 		t.Fatal("default speed")
 	}
-	out := audio.NewSound(48000, 1, make([]float32, 48000)).NewPlayer()
-	p.Attach(out)
-	p.playing = false
-	out.Seek(500 * time.Millisecond)
+	out := &nativeOutput{paused: true}
+	p.Native = out
+	p.Seek(500 * time.Millisecond)
 	for _, speed := range Speeds() {
 		p.SetSpeed(speed)
-		if out.Speed() != speed || !out.PreservesPitch() || out.Playing() || p.Position() != 500*time.Millisecond {
+		if out.speed != speed || !out.paused || p.Position() != 500*time.Millisecond {
 			t.Fatalf("speed %v altered transport", speed)
 		}
 	}
 	for _, speed := range []float64{0, -1, 0.49, 2.01, math.NaN(), math.Inf(1)} {
 		p.SetSpeed(speed)
-		if p.Speed() != 2 || out.Speed() != 2 {
+		if p.Speed() != 2 || out.speed != 2 {
 			t.Fatalf("accepted invalid speed %v", speed)
 		}
 	}

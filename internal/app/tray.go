@@ -103,7 +103,12 @@ func (a *app) bindMainWindow(w *desktop.Window) {
 		return
 	}
 	w.OnClosing(a.cx, func(event *desktop.WindowClosing) {
-		if a.cx.Env().OS() == core.OSWindows {
+		switch a.cx.Env().OS() {
+		case core.OSMacOS, core.OSLinux:
+			// Keep the surface that owns audio.Player available in the background.
+			event.Cancel()
+			w.Hide()
+		case core.OSWindows:
 			event.Cancel()
 			// NSGo's tray API cannot report a failed shell registration.
 			// Only hide the main window when the Windows icon can restore it.

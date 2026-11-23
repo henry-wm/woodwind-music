@@ -23,7 +23,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/HengWh/woodwind-music/internal/audio/mp4"
 	"github.com/dhowden/tag"
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
@@ -401,15 +400,10 @@ func (s *Source) readFile(file found) (entry, bool) {
 	defer f.Close()
 
 	typ := fileType(f, file.path)
-	var track *mp4.Track
-	switch typ {
-	case "m4a":
+	var track m4aInfo
+	if typ == "m4a" {
 		var ok bool
 		if track, ok = m4aTrack(f, file.size); !ok {
-			return entry{}, false // HE-AAC, say, which the player doesn't decode
-		}
-	case "aac":
-		if !adtsPlayable(f) {
 			return entry{}, false
 		}
 	}
@@ -436,7 +430,7 @@ func (s *Source) readFile(file found) (entry, bool) {
 	case "wav":
 		e.Duration = wavDuration(f, file.size)
 	case "m4a":
-		e.Duration = track.Duration.Milliseconds()
+		e.Duration = track.duration
 	case "aac":
 		e.Duration = adtsDuration(f, file.size)
 	default:

@@ -2,12 +2,9 @@ package player
 
 import (
 	"math"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/HengWh/woodwind-music/internal/audio"
 
 	"github.com/HengWh/woodwind-music/internal/music"
 )
@@ -20,107 +17,6 @@ func TestPlayEmptyQueue(t *testing.T) {
 	}
 }
 
-// silence is a long song of nothing.
-type silence struct{}
-
-func (silence) SampleRate() int               { return 48000 }
-func (silence) Channels() int                 { return 2 }
-func (silence) Len() int64                    { return 48000 * 600 }
-func (silence) SetPosition(int64) error       { return nil }
-func (silence) Read(b []float32) (int, error) { clear(b); return len(b), nil }
-
-// posted collects what the player posts to the main thread, for the test
-// to run there.
-func posted() (chan func(), *Player) {
-	ch := make(chan func(), 16)
-	p := New(func(fn func()) { ch <- fn })
-	p.Cue([]music.Track{{ID: "1", Name: "one", Duration: 600000}})
-	out := audio.NewPlayer(silence{})
-	out.SetVolume(0)
-	out.Play()
-	p.Attach(out)
-	p.fade.attach(out, 1)
-	return ch, p
-}
-
-func next(t *testing.T, ch chan func()) {
-	t.Helper()
-	select {
-	case fn := <-ch:
-		fn()
-	case <-time.After(2 * time.Second):
-		t.Fatal("nothing posted")
-	}
-}
-
-// Pausing fades out before the music stops; playing again fades it in.
-func TestPauseFades(t *testing.T) {
-	ch, p := posted()
-	defer p.out.Close()
-	p.TogglePlay()
-	if p.Playing() || !p.out.Playing() {
-		t.Fatal("paused at once, or not at all")
-	}
-	next(t, ch)
-	if p.out.Playing() {
-		t.Fatal("still playing after fading out")
-	}
-	if !p.fade.silent() {
-		t.Error("faded out to something")
-	}
-	p.TogglePlay()
-	if !p.Playing() || !p.out.Playing() {
-		t.Fatal("did not play again")
-	}
-	time.Sleep(fadeIn + 50*time.Millisecond)
-	p.fade.mu.Lock()
-	level := p.fade.level(time.Now())
-	p.fade.mu.Unlock()
-	if level != 1 {
-		t.Errorf("faded in to %v", level)
-	}
-}
-
-// A seek playing pauses, which fades out over a few milliseconds, and
-// plays again once there, its position the one asked for meanwhile.
-func TestSeekWithoutClick(t *testing.T) {
-	ch, p := posted()
-	defer p.out.Close()
-	p.Seek(90 * time.Second)
-	if p.out.Playing() {
-		t.Error("jumped while playing")
-	}
-	if p.Position() != 90*time.Second {
-		t.Errorf("position %v while seeking", p.Position())
-	}
-	next(t, ch)
-	if !p.out.Playing() || p.out.Position() < 90*time.Second {
-		t.Errorf("after the seek: playing %v at %v", p.out.Playing(), p.out.Position())
-	}
-}
-
-// Seeks one after the other, as the progress bar asks when let go, play
-// on from the last.
-func TestSeekTwicePlaysOn(t *testing.T) {
-	ch, p := posted()
-	defer p.out.Close()
-	p.Seek(90 * time.Second)
-	p.Seek(95 * time.Second)
-	next(t, ch)
-	for len(ch) > 0 {
-		next(t, ch)
-	}
-	time.Sleep(seekGap * 2)
-	for len(ch) > 0 {
-		next(t, ch)
-	}
-	if !p.out.Playing() || p.out.Position() < 95*time.Second {
-		t.Errorf("after two seeks: playing %v at %v", p.out.Playing(), p.out.Position())
-	}
-}
-
-// A radio asks for more as its queue nears its end, and adds what is not
-// in it already.
 func TestRadioRefills(t *testing.T) {
 	p := &Player{at: -1}
 	p.Cue([]music.Track{{ID: "1"}, {ID: "2"}})
@@ -157,52 +53,6 @@ func TestNormGain(t *testing.T) {
 		if g := normGain(c.st); math.Abs(g-c.want) > 1e-9 {
 			t.Errorf("%+v: %v, want %v", c.st, g, c.want)
 		}
-	}
-}
-
-// The cache gives back what it kept, at the quality asked for or a better
-// one, and drops what was played longest ago once over its limit.
-func TestCache(t *testing.T) {
-	dir := t.TempDir()
-	c := NewCache(dir, 400)
-	store := func(id string, st *music.Stream, n int) {
-		f := c.part(st)
-		f.Write(make([]byte, n))
-		f.Close()
-		c.keep("src", id, st.Quality, st, f.Name(), int64(n))
-	}
-	store("1", &music.Stream{Quality: "lossless", Type: "flac", Gain: -3}, 100)
-	dl, st, ok := c.lookup("src", "1", "high")
-	if !ok || dl.size != 100 || st.Type != "flac" || st.Gain != -3 {
-		t.Fatalf("lookup: %v %+v", ok, st)
-	}
-	dl.Close()
-	if _, _, ok := c.lookup("other", "1", "high"); ok {
-		t.Error("found another source's song of the same ID")
-	}
-	old := time.Now().Add(-time.Hour)
-	os.Chtimes(filepath.Join(dir, cacheKey("src", "1", "lossless")+".flac"), old, old)
-	store("2", &music.Stream{Quality: "high", Type: "mp3"}, 100)
-	store("3", &music.Stream{Quality: "high", Type: "mp3"}, 100)
-	store("4", &music.Stream{Quality: "high", Type: "mp3"}, 100)
-	store("5", &music.Stream{Quality: "high", Type: "mp3"}, 100)
-	if _, _, ok := c.lookup("src", "1", "standard"); ok {
-		t.Error("kept the song played longest ago")
-	}
-	if _, _, ok := c.lookup("src", "2", "lossless"); ok {
-		t.Error("found a high quality song for lossless")
-	}
-	if dl, _, ok := c.lookup("src", "5", "standard"); !ok {
-		t.Error("dropped the song just kept")
-	} else {
-		dl.Close()
-	}
-	if n := c.Size(); n > 400 {
-		t.Errorf("takes %d of 400", n)
-	}
-	c.Clear()
-	if n := c.Size(); n != 0 {
-		t.Errorf("cleared to %d", n)
 	}
 }
 
@@ -247,6 +97,7 @@ func pickyQueue() (*Player, chan func(), []music.Track) {
 	ch := make(chan func(), 64)
 	p := New(func(fn func()) { ch <- fn })
 	p.SetVolume(0)
+	p.Native = &nativeOutput{autoLoad: true}
 	src := picky{ok: map[string]bool{"a": true, "c": true}}
 	p.Source = func(string) music.Source { return src }
 	return p, ch, []music.Track{{ID: "a", Source: "s"}, {ID: "b", Source: "s"}, {ID: "c", Source: "s"}}

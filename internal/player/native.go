@@ -62,59 +62,86 @@ func (n *nativePlayback) release() {
 	}
 }
 
+func storedTrack(t music.Track) bool {
+	return t.StoredID != "" || t.Source != "" && t.Source != "local"
+}
+
+func (n *nativePlayback) setHandle(h *offline.Handle) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.closed {
+		h.Close()
+		return false
+	}
+	n.handle = h
+	return true
+}
+
+func (n *nativePlayback) storeStream(store *offline.Store, t music.Track, quality string, pre *offline.Handle) (*music.Stream, error) {
+	h := pre
+	if h != nil {
+		if _, err := h.Info(n.ctx); err != nil {
+			h.Close()
+			h = nil
+		}
+	}
+	if h == nil {
+		if err := n.ctx.Err(); err != nil {
+			return nil, err
+		}
+		var err error
+		h, err = store.Acquire(t, quality)
+		if err != nil {
+			return nil, err
+		}
+		if !n.setHandle(h) {
+			return nil, context.Canceled
+		}
+	}
+	info, err := h.Info(n.ctx)
+	if err != nil {
+		return nil, err
+	}
+	url, remove, err := h.URL()
+	if err != nil {
+		return nil, err
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.closed {
+		remove()
+		return nil, context.Canceled
+	}
+	n.unroute = remove
+	info.URL = url
+	return info, nil
+}
+
+type headerOutput interface {
+	OpenWithHeaders(string, map[string]string, bool, NativeEvents)
+}
+
 func (p *Player) loadNative(gen int, src music.Source, t music.Track, quality string, at, skipped, dir int) {
-	n := &nativePlayback{position: p.pending}
+	n := &nativePlayback{position: p.pending, handle: p.takeAhead(t, quality)}
 	n.ctx, n.cancel = context.WithCancel(context.Background())
 	p.native = n
+	pre, output, store := n.handle, p.Native, p.Library
 	go func() {
 		var info *music.Stream
 		var err error
-		if p.Library != nil && (t.StoredID != "" || t.Source != "local" && t.Source != "") {
-			var h *offline.Handle
-			h, err = p.Library.Acquire(t, quality)
-			if err == nil {
-				n.mu.Lock()
-				if n.closed {
-					h.Close()
-					n.mu.Unlock()
-					return
-				}
-				n.handle = h
-				n.mu.Unlock()
-				info, err = h.Info(n.ctx)
-				if err == nil {
-					var url string
-					var remove func()
-					url, remove, err = h.URL()
-					if err == nil {
-						n.mu.Lock()
-						if n.closed {
-							remove()
-							n.mu.Unlock()
-							return
-						}
-						n.unroute = remove
-						n.mu.Unlock()
-						info.URL = url
-						info.Headers = nil
-					}
-				}
-			}
-		} else if src == nil {
+		switch {
+		case store != nil && storedTrack(t):
+			info, err = n.storeStream(store, t, quality, pre)
+		case src == nil:
 			err = errNoSource
-		} else {
+		default:
 			info, err = src.Stream(t.ID, quality)
-			if err == nil && (info == nil || info.URL == "") {
-				err = music.ErrUnavailable
-			}
-			// core.Video has no request-header API. Never silently send an
-			// authenticated stream to it without its required headers.
-			_, headerOutput := p.Native.(interface {
-				OpenWithHeaders(string, map[string]string, bool, NativeEvents)
-			})
-			if err == nil && len(info.Headers) > 0 && !headerOutput {
-				err = errors.New("native playback: stream request headers are not supported")
-			}
+		}
+		if err == nil && (info == nil || info.URL == "") {
+			err = music.ErrUnavailable
+		}
+		if _, ok := output.(headerOutput); err == nil && len(info.Headers) > 0 && !ok {
+			err = errors.New("native playback: stream request headers are not supported")
 		}
 		p.post(func() {
 			if gen != p.gen || p.native != n {
@@ -146,6 +173,7 @@ func (p *Player) loadNative(gen int, src music.Source, t music.Track, quality st
 						p.nativeSeek(p.pending)
 						p.pending = 0
 						p.record()
+						p.getAhead(quality)
 						p.sync()
 					})
 				},
@@ -179,23 +207,22 @@ func (p *Player) loadNative(gen int, src music.Source, t music.Track, quality st
 				},
 				Error: func(err error) {
 					current(func() {
-						n.release()
 						p.Native.Close()
+						n.release()
+						p.dropAhead()
 						p.native = nil
 						p.loading = false
 						p.loadFailed(t.Source, err, at, skipped, dir)
 					})
 				},
 			}
-			if output, ok := p.Native.(interface {
-				OpenWithHeaders(string, map[string]string, bool, NativeEvents)
-			}); ok {
-				output.OpenWithHeaders(info.URL, info.Headers, !p.playing, events)
-			} else {
-				p.Native.Open(info.URL, !p.playing, events)
-			}
 			p.applyGain()
 			p.applySpeed()
+			if withHeaders, ok := output.(headerOutput); ok {
+				withHeaders.OpenWithHeaders(info.URL, info.Headers, !p.playing, events)
+			} else {
+				output.Open(info.URL, !p.playing, events)
+			}
 			p.sync()
 		})
 	}()

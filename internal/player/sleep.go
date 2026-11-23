@@ -48,7 +48,7 @@ func (p *Player) expireSleepTimer(gen int) {
 	p.awaiting = false
 	if p.playing {
 		switch {
-		case p.remote != nil && p.remote.started, p.native != nil, p.out != nil:
+		case p.remote != nil && p.remote.started, p.native != nil:
 			p.TogglePlay()
 		default:
 			// A load (including a remote play request) observes this intent

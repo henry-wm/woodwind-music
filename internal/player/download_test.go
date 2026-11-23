@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/HengWh/woodwind-music/internal/music"
+	"github.com/HengWh/woodwind-music/internal/offline"
 )
 
 // streamer answers the same stream for any track, counting how often it's asked.
@@ -41,7 +42,6 @@ func TestSaveSong(t *testing.T) {
 	var asked int
 	src := streamer{st: music.Stream{URL: srv.URL, Type: "flac", Headers: map[string]string{"Authorization": "Bearer token"}}, asked: &asked}
 	p := New(func(func()) {})
-	p.Cache = NewCache(t.TempDir(), 1<<30)
 	dir := t.TempDir()
 
 	song, err := p.FindSong(src, music.Track{ID: "1", Source: "src"}, "high")
@@ -60,11 +60,13 @@ func TestSaveSong(t *testing.T) {
 	}
 
 	kept := []byte("kept in the cache")
-	st := &music.Stream{Quality: "lossless", Type: "ogg"}
-	f := p.Cache.part(st)
-	f.Write(kept)
-	f.Close()
-	p.Cache.keep("src", "2", "lossless", st, f.Name(), int64(len(kept)))
+	cache := t.TempDir()
+	writeLegacyCache(t, cache, "src", "2", "lossless", "ogg", kept)
+	p.Library, err = offline.Open(cache, 64<<20, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(p.Library.Close)
 	asked = 0
 	song, err = p.FindSong(src, music.Track{ID: "2", Source: "src"}, "high")
 	if err != nil {

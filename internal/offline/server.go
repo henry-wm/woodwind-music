@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// localServer serves one shared transfer to Android's native player. Ranges
+// localServer serves one shared transfer to NSGo's native players. Ranges
 // read the same growing file; seeking never starts a second upstream download.
 type localServer struct {
 	mu       sync.Mutex

@@ -120,7 +120,6 @@ var zhCN = map[string]string{
 	"Search %s":                       "搜索%s",
 	"Playback Mode":                   "播放模式",
 	"Playback Speed":                  "倍速播放",
-	"Keep original pitch":             "保留原声调",
 	"Normal":                          "正常",
 	"List Loop":                       "列表循环",
 	"Single-track Loop":               "单曲循环",

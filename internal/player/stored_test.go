@@ -3,6 +3,7 @@ package player
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"image"
 	"image/png"
 	"io"
@@ -29,15 +30,23 @@ func TestUnidentifiedHistoricalCachePlaysWithoutSource(t *testing.T) {
 		t.Fatal("missing historical cache")
 	}
 	tr := s.Track(records[0])
-	p := &Player{Library: s}
-	_, stream, err := p.open(nil, tr, "lossless", nil)
+	p, out, ch := newNativeTest()
+	t.Cleanup(p.Close)
+	p.Library = s
+	out.autoLoad = true
+	p.PlayTrack([]music.Track{tr}, 0)
+	settle(t, ch, p)
+	if !p.Ready() || out.source == "" {
+		t.Fatalf("historical audio did not reach the native player: %s", p.Err())
+	}
+	response, err := http.Get(out.source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Close()
-	samples := make([]float32, 1024)
-	if n, err := stream.Read(samples); n == 0 || err != nil {
-		t.Fatal("historical audio did not decode", err)
+	defer response.Body.Close()
+	b, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || len(b) == 0 {
+		t.Fatalf("historical audio could not be read: %s, %v", response.Status, err)
 	}
 }
 
@@ -47,19 +56,26 @@ func seedHistoricalCache(t *testing.T, root, source, id string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cache := NewCache(filepath.Join(root, "songs"), 64<<20)
-	stream := &music.Stream{Type: "mp3", Quality: "high"}
-	part := cache.part(stream)
-	if part == nil {
-		t.Fatal("could not create fixture")
+	writeLegacyCache(t, root, source, id, "high", "mp3", data)
+
+}
+
+func writeLegacyCache(t *testing.T, root, source, id, quality, typ string, data []byte) {
+	t.Helper()
+	dir := filepath.Join(root, "songs")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
 	}
-	_, writeErr := part.Write(data)
-	closeErr := part.Close()
-	if writeErr != nil || closeErr != nil {
-		t.Fatalf("could not write fixture: %v, %v", writeErr, closeErr)
+	key := filepath.Join(dir, offline.Key(source, id)+"-"+quality)
+	meta, err := json.Marshal(music.Stream{Type: typ, Quality: quality, Size: int64(len(data))})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, kept := cache.keep(source, id, "high", stream, part.Name(), int64(len(data))); !kept {
-		t.Fatal("could not keep fixture")
+	if err := os.WriteFile(key+"."+typ, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(key+".json", meta, 0600); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -119,6 +135,7 @@ func TestCachedPlaybackCompletesPendingLyricsAndCover(t *testing.T) {
 	p := New(func(fn func()) { ch <- fn })
 	t.Cleanup(p.Close)
 	p.Library = store
+	p.Native = &nativeOutput{autoLoad: true}
 	p.Source = func(string) music.Source { return src }
 	store.OnChange(func() { p.post(p.RefreshStored) })
 	p.PlayTrack([]music.Track{track}, 0)
@@ -190,43 +207,26 @@ func savedPlayerTrack(t *testing.T) (*offline.Store, music.Track) {
 	return s, s.Track(r)
 }
 
-func TestStoredPlaybackWithoutPluginDesktopAndNative(t *testing.T) {
-	for _, native := range []bool{false, true} {
-		t.Run(map[bool]string{false: "desktop", true: "native"}[native], func(t *testing.T) {
-			s, tr := savedPlayerTrack(t)
-			ch := make(chan func(), 128)
-			p := New(func(fn func()) { ch <- fn })
-			t.Cleanup(p.Close)
-			p.Library = s
-			p.Source = func(string) music.Source { return nil }
-			p.Quality = func() string { return "lossless" }
-			if native {
-				p.Native = &nativeOutput{}
-			}
-			p.PlayTrack([]music.Track{tr}, 0)
-			if native {
-				out := p.Native.(*nativeOutput)
-				nativeUntil(t, ch, func() bool { return out.source != "" || p.Err() != "" })
-				if p.Err() != "" {
-					t.Fatal(p.Err())
-				}
-				out.events.Loaded(10 * time.Second)
-				nativeUntil(t, ch, p.Ready)
-			} else {
-				settle(t, ch, p)
-				if !p.Ready() {
-					t.Fatal(p.Err())
-				}
-			}
-			queue := p.Queue()
-			p.DetachSource("gone")
-			if len(p.Queue()) != len(queue) || !p.Playing() {
-				t.Fatal("source removal cleared local playback")
-			}
-			session, ok := p.Session()
-			if !ok || !session.Queue[0].LocalOnly || session.Queue[0].StoredID == "" {
-				t.Fatal("session lost local playback identity")
-			}
-		})
+func TestStoredPlaybackWithoutPlugin(t *testing.T) {
+	s, tr := savedPlayerTrack(t)
+	p, out, ch := newNativeTest()
+	t.Cleanup(p.Close)
+	p.Library = s
+	p.Source = func(string) music.Source { return nil }
+	p.Quality = func() string { return "lossless" }
+	out.autoLoad = true
+	p.PlayTrack([]music.Track{tr}, 0)
+	settle(t, ch, p)
+	if !p.Ready() {
+		t.Fatal(p.Err())
+	}
+	length := len(p.Queue())
+	p.DetachSource("gone")
+	if len(p.Queue()) != length || !p.Playing() {
+		t.Fatal("source removal cleared local playback")
+	}
+	session, ok := p.Session()
+	if !ok || !session.Queue[0].LocalOnly || session.Queue[0].StoredID == "" {
+		t.Fatal("session lost local playback identity")
 	}
 }

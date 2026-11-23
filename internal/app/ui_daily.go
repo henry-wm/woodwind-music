@@ -13,7 +13,6 @@ import (
 
 	"github.com/HengWh/woodwind-music/internal/i18n"
 	"github.com/HengWh/woodwind-music/internal/music"
-	"github.com/HengWh/woodwind-music/internal/player"
 )
 
 // featureCard leads a source's Home with the songs of its first section: the
@@ -217,8 +216,7 @@ func dailyArtists(tracks []music.Track) string {
 	return i18n.Tf("%s and more · %s", strings.Join(names, ", "), i18n.Songs(len(tracks)))
 }
 
-// dailyPlayButton plays the songs; while they play it says so, its bars
-// dancing, and pauses them; paused, it goes on.
+// dailyPlayButton plays, pauses or resumes the daily songs.
 func (a *app) dailyPlayButton(tracks []music.Track, ours, playing bool) core.Node {
 	ink := core.RGB(0x1d1d1f)
 	label := func() string {
@@ -252,17 +250,6 @@ func (a *app) dailyPlayButton(tracks []music.Track, ours, playing bool) core.Nod
 		Children: []core.Node{
 			core.Dynamic(func(*core.Scope) core.Node {
 				a.playRev.Get()
-				a.dailyPlay.Get()
-				hovered := a.dailyPlay.GetUntracked()
-				if playing && !hovered {
-					return core.Canvas{Style: core.Style{Width: core.Pt(14), Height: core.Pt(13)},
-						Draw: func(d *core.Drawing, size core.Size) {
-							a.dailyTick.Get()
-							a.playRev.Get()
-							lv, live := a.pl.Levels()
-							drawDailyBars(d, size, &a.dailyBars, lv, live)
-						}}
-				}
 				if playing {
 					return icon(lucidePause, 14, ink)
 				}
@@ -495,33 +482,6 @@ func (a *app) drawRecord(d *core.Drawing, size core.Size) {
 	d.Arc(cx, cy, 2.5, 0, 2*math.Pi, false)
 	d.SetFillColor(core.RGB(0x0e0e10))
 	d.Fill()
-}
-
-// drawDailyBars dances the bars on the daily card's play button.
-func drawDailyBars(d *core.Drawing, size core.Size, bars *[4]float32, levels [player.Bands]float32, live bool) {
-	const n = 4
-	per := player.Bands / n
-	sw, sh := float32(size.Width), float32(size.Height)
-	gap := sw / n * 0.38
-	w := (sw - gap*(n-1)) / n
-	for i := range n {
-		var sum float32
-		for b := i * per; b < (i+1)*per; b++ {
-			sum += levels[b]
-		}
-		v := sum / float32(per)
-		v = v * v * 1.15
-		if !live {
-			v = 0
-		}
-		bars[i] += (v - bars[i]) * 0.35
-		h := max(2.5, min(sh, sh*bars[i]))
-		x := float32(i) * (w + gap)
-		d.BeginPath()
-		d.RoundRect(x, sh-h, w, h, w/2)
-		d.SetFillColor(core.RGBA(0xd8262d, 1))
-		d.Fill()
-	}
 }
 
 // spinState turns the daily card's record: its angle, in degrees, how far the

@@ -1,26 +1,20 @@
 package player
 
-import "github.com/HengWh/woodwind-music/internal/music"
+import (
+	"github.com/HengWh/woodwind-music/internal/music"
+	"github.com/HengWh/woodwind-music/internal/offline"
+)
 
-// The next track's audio is asked for once the current one plays, and comes in
-// meanwhile, so that it starts at once when its turn comes: a source may take
-// seconds to give a stream, as one that works it out with programs does.
-
-// ahead is a track's audio asked for before its turn.
 type ahead struct {
 	source, id, quality string
-	done                chan struct{} // closed once info, dl and err are in
-	info                *music.Stream
-	err                 error
-	resource            *playback
+	handle              *offline.Handle
 }
 
-func (a *ahead) is(t music.Track, quality string) bool {
+func (a *ahead) matches(t music.Track, quality string) bool {
 	return a.source == t.Source && a.id == t.ID && a.quality == quality
 }
 
-// upNext is the track that plays when the current one ends, if one does by
-// itself: not a radio's next, which its feed may not have given yet.
+// upNext is the track that plays when the current one ends on its own.
 func (p *Player) upNext() (music.Track, bool) {
 	if p.at < 0 || p.at >= len(p.order) || p.repeat == RepeatOne {
 		return music.Track{}, false
@@ -38,84 +32,37 @@ func (p *Player) upNext() (music.Track, bool) {
 	return p.queue[p.order[at]], true
 }
 
-// getAhead asks for the next track's audio at quality, unless it's kept
-// already or its source plays it elsewhere. What was asked for before that
-// isn't next any more is let go.
 func (p *Player) getAhead(quality string) {
-	if p.closed {
-		return
-	}
 	t, ok := p.upNext()
-	if p.track != nil && p.track.LocalOnly {
-		p.dropAhead()
+	if p.ahead != nil && ok && p.ahead.matches(t, quality) {
 		return
 	}
-	if a := p.ahead; a != nil {
-		if ok && a.is(t, quality) {
-			return
-		}
-		p.dropAhead()
-	}
-	if !ok {
+	p.dropAhead()
+	if !p.Prefetch || p.Library == nil || !ok || p.track.LocalOnly || t.LocalOnly || !storedTrack(t) || p.Library.Has(t) {
 		return
 	}
 	src := p.sourceOf(&t)
-	if p.Library != nil && (t.StoredID != "" || t.Source != "local" && t.Source != "") {
-		if src == nil || p.Library.Has(t) || t.LocalOnly || src.Info().Playback == music.PlaybackRemote {
-			return
-		}
-		a := &ahead{source: t.Source, id: t.ID, quality: quality, done: make(chan struct{}), resource: p.newPlayback()}
-		p.ahead = a
-		go func() { defer close(a.done); a.info, _, a.err = p.storedInput(t, quality, a.resource) }()
+	if src == nil || src.Info().Playback == music.PlaybackRemote {
 		return
 	}
-	if src == nil || src.Info().Playback == music.PlaybackRemote || p.Cache.has(t.Source, t.ID, quality) {
-		return
+	if h, err := p.Library.Acquire(t, quality); err == nil {
+		p.ahead = &ahead{source: t.Source, id: t.ID, quality: quality, handle: h}
 	}
-	a := &ahead{source: t.Source, id: t.ID, quality: quality, done: make(chan struct{}), resource: p.newPlayback()}
-	p.ahead = a
-	go func() {
-		defer close(a.done)
-		info, err := src.Stream(t.ID, quality)
-		if err == nil && info == nil {
-			err = music.ErrUnavailable
-		}
-		if err != nil {
-			a.err = err
-			return
-		}
-		a.info = info
-		if _, isFile := music.PathOf(info.URL); !isFile {
-			_, a.err = a.resource.acquire(func() (*download, error) {
-				return p.Cache.download(t.Source, t.ID, quality, info), nil
-			})
-		}
-	}()
 }
 
-// takeAhead returns what was asked for ahead of t at quality, if it was, for
-// the caller to open or close.
-func (p *Player) takeAhead(t music.Track, quality string) *ahead {
+func (p *Player) takeAhead(t music.Track, quality string) *offline.Handle {
 	a := p.ahead
-	if a == nil || !a.is(t, quality) {
-		return nil
+	if a != nil && !t.LocalOnly && a.matches(t, quality) {
+		p.ahead = nil
+		return a.handle
 	}
-	p.ahead = nil
-	return a
+	p.dropAhead()
+	return nil
 }
 
-// dropAhead lets go of what was asked for ahead, stopping it if it's still
-// coming in. What has all come in stays in the cache.
 func (p *Player) dropAhead() {
-	a := p.ahead
-	p.ahead = nil
-	if a == nil {
-		return
+	if a := p.ahead; a != nil {
+		p.ahead = nil
+		a.handle.Close()
 	}
-	go a.close()
-}
-
-// close cancels the input without waiting for the source's Stream call.
-func (a *ahead) close() {
-	a.resource.close()
 }

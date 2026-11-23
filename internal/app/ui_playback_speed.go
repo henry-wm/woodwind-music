@@ -51,7 +51,6 @@ func (a *app) playbackSpeedButton(id string, color core.Color, height core.Point
 			Children: append([]core.Node{
 				core.View{Style: core.Style{Padding: core.Symmetric(8, 12), Gap: 4}, Children: []core.Node{
 					text(i18n.T("Playback Speed"), 14, core.FontWeightSemibold, p.text),
-					text(i18n.T("Keep original pitch"), 12, core.FontWeightNormal, p.muted),
 				}},
 			}, items...),
 		}
