@@ -351,6 +351,13 @@ WOOD_WIND_PHONE_SHOTS=1 go tool nsgo test -target macos -run '^TestPhoneShots$' 
 | `scripts`、`.github/workflows` | 打包与持续集成 |
 | `docs` | 平台说明、验证记录与界面截图 |
 
+## 致谢
+
+感谢以下开源项目的作者与贡献者。
+
+- **MyGo Music** 是木听风音乐的上游项目。木听风沿用了它的界面设计、交互与文案，以及曲库、歌词和播放队列等核心实现。[MyGo Music](https://github.com/egoist/mygo-music)
+- **NSGo** 为木听风提供应用框架、窗口、界面渲染和原生媒体播放能力。[NSGo](https://github.com/nsgo-dev/nsgo)
+
 ## 许可证
 
 木听风音乐以 **AGPL-3.0** 发布。源码来源、版权署名和第三方许可证见仓库内的 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。
