@@ -375,7 +375,7 @@ WOOD_WIND_PHONE_SHOTS=1 go tool nsgo test -target macos -run '^TestPhoneShots$' 
 
 - **[MyGo Music](https://github.com/egoist/mygo-music)**：本项目复刻与移植的基础，提供界面设计、交互、文案，以及播放、曲库、歌词和队列等核心实现。
 - **[NSGo](https://github.com/nsgo-dev/nsgo)**：提供应用框架、窗口、界面渲染、桌面 PCM 输出与安卓原生媒体能力。
-- **[MyGo](https://github.com/egoist/mygo)**：提供 `internal/audio` 所使用的音频引擎代码。
+- `internal/audio` 中的部分音频引擎源码从 MyGo 移植，已纳入本仓库并随木听风一起编译。[MyGo](https://github.com/egoist/mygo) · [MIT 许可证](LICENSES/MyGo-MIT.txt)
 
 感谢上述项目的作者与贡献者。本项目在其基础上迁移界面框架，并继续进行桌面与移动平台适配。
 
