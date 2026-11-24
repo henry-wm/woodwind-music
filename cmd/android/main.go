@@ -113,9 +113,14 @@ func build(install, launch bool, device string, debug bool) error {
 	}
 	var compile []string
 	for _, source := range sources {
-		if filepath.Base(source) != "NsgoActivity.java" {
-			compile = append(compile, source)
+		if filepath.Base(source) == "NsgoActivity.java" {
+			continue
 		}
+		source, err := stagePlaybackFrameworkSource(source, stage)
+		if err != nil {
+			return err
+		}
+		compile = append(compile, source)
 	}
 	own, _ := filepath.Glob("android/src/dev/oneo/nsgo/*.java")
 	compile = append(compile, own...)

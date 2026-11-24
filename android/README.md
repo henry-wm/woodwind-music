@@ -1,6 +1,6 @@
 # Android host
 
-This host keeps `core.Video` as wood wind music’s audio player. It adds Android's platform `MediaSession` and a `mediaPlayback` foreground service, using NSGo's public `HostParams`, `PostHost`, and `OnHostEvent` APIs. NSGo is downloaded at the version pinned in `go.mod`; the host reads its Java sources from the resolved module directory without modifying them or adding a second playback engine.
+This host keeps `core.Video` as wood wind music’s audio player. It adds Android's platform `MediaSession` and a `mediaPlayback` foreground service, using NSGo's public `HostParams`, `PostHost`, and `OnHostEvent` APIs. NSGo is downloaded at the version pinned in `go.mod`; the build copies and adapts two Java sources in its staging directory so the managed view can keep playing and reporting progress after it leaves the screen. The pinned module remains untouched.
 
 Compile the pinned host with Android SDK Platform 36 (`android/bootstrap.sh` installs it locally). The manifest continues to support Android 9 / API 28 and target API 35.
 
@@ -13,7 +13,7 @@ On macOS Apple Silicon:
 go run ./cmd/android -install -run
 ```
 
-The bootstrap script downloads the official Android SDK tools, D8, and an Adoptium JDK into the ignored `.tools/android/` directory. Other development hosts can provide `ANDROID_HOME`, `JAVA_HOME`, `R8_JAR`, and `ADB` instead. The Go command first builds the NSGo executable, compiles the existing NSGo Java sources together with this host (replacing only the launcher activity), packages the manifest/resources, aligns the APK and signs it with the project's existing NSGo debug key. It also updates the APK checksum. Use `-device SERIAL` to select a phone and `-debug` to enable `run-as` inspection during development.
+The bootstrap script downloads the official Android SDK tools, D8, and an Adoptium JDK into the ignored `.tools/android/` directory. Other development hosts can provide `ANDROID_HOME`, `JAVA_HOME`, `R8_JAR`, and `ADB` instead. The Go command first builds the NSGo executable, compiles the existing NSGo Java sources together with this host (replacing the launcher activity and staging the playback adaptations), packages the manifest/resources, aligns the APK and signs it with the project's existing NSGo debug key. It also updates the APK checksum. Use `-device SERIAL` to select a phone and `-debug` to enable `run-as` inspection during development.
 
 The public 0.1.0 release uses `build_number: 131`, independently of its display version, so it can upgrade private 0.1.30 builds (versionCode 130) with the same app ID and signing key. Keep that key private and backed up; replacing it breaks existing installs' update path. The release APK is not debuggable and disables Android backup. Third-party plugins and their account stores are loaded only from each installation's private data, never seeded from the APK. Existing installations retain their own plugins and login state on an upgrade; new installations start without them.
 

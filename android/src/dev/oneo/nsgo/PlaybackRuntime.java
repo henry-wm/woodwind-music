@@ -23,7 +23,9 @@ final class PlaybackRuntime {
         activity = host;
         if (view == null) {
             context = new MutableContextWrapper(host);
-            view = new NsgoView(context);
+            view = new NsgoView(context) {
+                @Override protected boolean keepsVideosPlayingInBackground() { return true; }
+            };
             view.setParams(Map.of("music.android", true, "music.saf", true, "music.timeZone", TimeZone.getDefault().getID()));
             view.handle("playback.update", (data, reply) -> {
                 if (data instanceof Map) update((Map<String, Object>) data);
