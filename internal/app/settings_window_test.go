@@ -32,7 +32,8 @@ func TestSettingsWindowSurvivesSidebarUpdates(t *testing.T) {
 	if first.Closed() {
 		t.Fatal("a sidebar update closed the settings window")
 	}
-	first.Hide()
+	ui.Post(first.Hide)
+	ui.Settle()
 	pressSettings()
 	if a.settingsWin != first || len(ui.Surfaces()) != 2 {
 		t.Fatal("opening Settings again did not reuse its window")

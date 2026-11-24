@@ -1,6 +1,6 @@
 # Windows 使用与验证
 
-0.1.0 提供 Windows x64 构建，目标为 Windows 10 / 11 x64，标为实验性支持。当前开发环境是 macOS：已完成交叉编译和共享逻辑回归，尚未在 Windows 真机验证完整播放流程。Windows ARM64 暂不作为本次交付目标。
+0.2.0 提供 Windows x64 构建，目标为 Windows 10 / 11 x64，标为实验性支持。当前开发环境是 macOS：已完成交叉编译、静态检查、共享逻辑回归与打包审计，尚未在 Windows 真机验证完整播放流程。Windows ARM64 暂不作为本次交付目标。
 
 ## 安装与运行
 
@@ -32,7 +32,7 @@ Windows 桌面服务集中在 `internal/winshell`；NSGo 补齐对应功能后�
 按根目录 README 安装 Go 并获取项目，NSGo 依赖会自动从远程下载，再执行：
 
 ```sh
-go tool nsgo test
+go run scripts/test-quiet.go
 go tool nsgo check -target windows_x64
 go tool nsgo build -target windows_x64
 go run scripts/package-windows.go

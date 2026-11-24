@@ -318,6 +318,8 @@ func TestSettingsView(t *testing.T) {
 	var a *app
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
 		a = newApp(cx)
+		a.set.Language = i18n.English
+		a.applyLanguage()
 		return a.settingsView(cx)
 	}, nsgotest.Size(780, 640))
 	app.Find("text:Language")
@@ -342,9 +344,11 @@ func TestSettingsView(t *testing.T) {
 	app.WaitFor("text:Language", 2*time.Second)
 
 	// Chinese from then on.
-	a.set.Language = i18n.Chinese
-	a.applyLanguage()
-	a.bump()
+	app.Post(func() {
+		a.set.Language = i18n.Chinese
+		a.applyLanguage()
+		a.bump()
+	})
 	app.WaitFor("text:语言", 2*time.Second)
 	app.Find("text:外观")
 	app.Find("text:资料库")
