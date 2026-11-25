@@ -43,7 +43,7 @@ func (o *audioOutput) OpenWithHeaders(source string, headers map[string]string, 
 		o.relay = relay
 		source = relay.URL
 	}
-	o.track = o.cx.Child()
+	o.cx.Run(func() { o.track = o.cx.Child() })
 	o.current = audio.NewPlayer(o.track, audio.Source{URI: source}, audio.PlayerOptions{
 		ProgressInterval: 200 * time.Millisecond,
 		OnLoad:           events.Loaded,
@@ -80,16 +80,17 @@ func (o *audioOutput) SetPaused(paused bool) {
 	if p.State() != audio.PlayerPlaying {
 		o.level = 0
 		o.applyVolume()
-		p.Play(nil)
 	}
+	p.Play(nil)
 	o.fade(1, 260*time.Millisecond, nil)
 }
 
 func (o *audioOutput) fade(to float64, duration time.Duration, done func()) {
-	start, from := o.track.Now(), o.level
+	track := o.track
+	start, from := track.Now(), o.level
 	var tick func()
 	tick = func() {
-		fraction := min(1, float64(o.track.Now().Sub(start))/float64(duration))
+		fraction := min(1, float64(track.Now().Sub(start))/float64(duration))
 		o.level = from + (to-from)*fraction
 		o.applyVolume()
 		if fraction == 1 {
@@ -99,7 +100,10 @@ func (o *audioOutput) fade(to float64, duration time.Duration, done func()) {
 			}
 			return
 		}
-		o.stop = o.track.AfterFunc(16*time.Millisecond, tick)
+		// Transport buttons rebuild when playRev changes. Keep the fade timer
+		// on the track scope so disposing that button does not cancel pausing
+		// or leave resumed audio muted.
+		track.Run(func() { o.stop = track.AfterFunc(16*time.Millisecond, tick) })
 	}
 	tick()
 }
