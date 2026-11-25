@@ -57,8 +57,10 @@ func (a *app) initSources() {
 		a.registerPlugin(p)
 	}
 	a.active = a.local
-	if src := a.sourceByID(a.set.Source); src != nil {
-		a.active = src
+	if a.pluginEnabled(a.set.Source) {
+		if src := a.sourceByID(a.set.Source); src != nil {
+			a.active = src
+		}
 	}
 	if a.active != a.local {
 		id := a.active.Info().ID
@@ -92,6 +94,53 @@ func (a *app) closePlugins() {
 		a.installer.pending.Discard()
 		a.installer.pending = nil
 	}
+	for id, pending := range a.installer.pendingUpdates {
+		if pending != nil {
+			pending.Discard()
+		}
+		delete(a.installer.pendingUpdates, id)
+	}
+}
+
+func (a *app) pluginEnabled(id string) bool {
+	if id == "" || id == local.ID {
+		return true
+	}
+	return !slices.Contains(a.set.DisabledPlugins, id)
+}
+
+func (a *app) enabledPlugins() []*plugin.Plugin {
+	out := make([]*plugin.Plugin, 0, len(a.plugins))
+	for _, p := range a.plugins {
+		if a.pluginEnabled(p.Info().ID) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (a *app) setPluginEnabled(p *plugin.Plugin, on bool) {
+	if p == nil {
+		return
+	}
+	id := p.Info().ID
+	if on {
+		a.set.DisabledPlugins = slices.DeleteFunc(slices.Clone(a.set.DisabledPlugins), func(s string) bool { return s == id })
+		a.set.save()
+		a.registerPlugin(p)
+		a.loadAccount(p)
+		a.bump()
+		return
+	}
+	if !slices.Contains(a.set.DisabledPlugins, id) {
+		a.set.DisabledPlugins = append(a.set.DisabledPlugins, id)
+	}
+	a.set.save()
+	if a.source().Info().ID == id {
+		a.switchSource(local.ID)
+	}
+	go p.Close()
+	a.bump()
 }
 
 func (a *app) activateSource(id string) {
@@ -245,7 +294,9 @@ func (a *app) completeLocalTrack(t music.Track) (music.Track, *music.Lyrics) {
 	a.sources.RLock()
 	var ids []string
 	for id := range a.sources.items {
-		ids = append(ids, id)
+		if a.pluginEnabled(id) {
+			ids = append(ids, id)
+		}
 	}
 	slices.Sort(ids)
 	providers := make([]music.Source, 0, len(ids))

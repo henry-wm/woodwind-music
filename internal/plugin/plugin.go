@@ -661,6 +661,13 @@ func (p *Plugin) Info() music.Info {
 	info.Settings = slices.Clone(info.Settings)
 	for i, st := range info.Settings {
 		info.Settings[i].Label, info.Settings[i].Help = p.t(st.Label), p.t(st.Help)
+		if len(st.Options) > 0 {
+			opts := slices.Clone(st.Options)
+			for j, opt := range opts {
+				opts[j].Label = p.t(opt.Label)
+			}
+			info.Settings[i].Options = opts
+		}
 	}
 	info.Navigation = slices.Clone(info.Navigation)
 	for i, n := range info.Navigation {

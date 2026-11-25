@@ -3,6 +3,8 @@ package plugin
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,15 +45,40 @@ const (
 
 // Origin is where a plugin was installed from.
 type Origin struct {
-	Repo    string `json:"repo"` // owner/repo
-	Version string `json:"version"`
+	Repo        string `json:"repo,omitempty"` // owner/repo
+	Version     string `json:"version"`
+	FeedURL     string `json:"feedUrl,omitempty"`
+	DownloadURL string `json:"downloadUrl,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`
 }
 
-// Release is what a repository offers to install.
+// Remote reports whether the origin came from a GitHub repository or feed.
+func (o Origin) Remote() bool {
+	return o.Repo != "" || o.FeedURL != "" || o.DownloadURL != ""
+}
+
+// sameOrigin reports whether an incoming install may replace an existing one.
+func sameOrigin(was, next Origin) bool {
+	if !was.Remote() && !next.Remote() {
+		return true
+	}
+	if was.Repo != "" && next.Repo != "" && was.Repo == next.Repo {
+		return true
+	}
+	if was.FeedURL != "" && next.FeedURL != "" && was.FeedURL == next.FeedURL {
+		return true
+	}
+	return false
+}
+
+// Release is what a repository or feed offers to install.
 type Release struct {
-	Repo    string
-	Version string // the tag, or the commit
-	url     string // of the archive
+	Repo        string
+	Version     string // the tag, the commit, or the feed version
+	FeedURL     string
+	DownloadURL string
+	SHA256      string
+	url         string // of the archive
 }
 
 // Pending is a plugin downloaded and checked, waiting for the listener to say
@@ -348,14 +375,21 @@ func pending(dir string, into func(tmp string) (*Pending, error)) (*Pending, err
 
 func fetchInto(rel *Release, tmp string) (*Pending, error) {
 	archive := filepath.Join(tmp, "archive.zip")
-	if err := download(rel.url, archive); err != nil {
+	if err := download(rel.url, archive, rel.SHA256); err != nil {
 		return nil, err
 	}
 	unpacked := filepath.Join(tmp, "unpacked")
-	if err := unzip(archive, unpacked); err != nil {
-		return nil, fmt.Errorf("unpacking %s: %w", rel.Repo, err)
+	from := rel.Repo
+	if from == "" {
+		from = rel.FeedURL
 	}
-	return checked(unpacked, tmp, rel.Repo, &Pending{Release: *rel})
+	if from == "" {
+		from = rel.url
+	}
+	if err := unzip(archive, unpacked); err != nil {
+		return nil, fmt.Errorf("unpacking %s: %w", from, err)
+	}
+	return checked(unpacked, tmp, from, &Pending{Release: *rel})
 }
 
 // checked finds the plugin in what was unpacked, and fills in p with it if it's
@@ -477,7 +511,7 @@ func copyFile(from, to string, perm os.FileMode, limit int64) (int64, error) {
 	return n, out.Close()
 }
 
-func download(url, path string) error {
+func download(url, path, wantSHA256 string) error {
 	// An asset from the API comes as itself with this, and as its description
 	// without; a zipball refuses it.
 	accept := ""
@@ -497,14 +531,28 @@ func download(url, path string) error {
 		return err
 	}
 	defer f.Close()
-	n, err := io.Copy(f, io.LimitReader(res.Body, maxArchive+1))
+	var dst io.Writer = f
+	var sum = sha256.New()
+	if wantSHA256 != "" {
+		dst = io.MultiWriter(f, sum)
+	}
+	n, err := io.Copy(dst, io.LimitReader(res.Body, maxArchive+1))
 	if err != nil {
 		return err
 	}
 	if n > maxArchive {
 		return errors.New("the plugin's archive is too large")
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if wantSHA256 != "" {
+		got := hex.EncodeToString(sum.Sum(nil))
+		if !strings.EqualFold(got, strings.TrimSpace(wantSHA256)) {
+			return fmt.Errorf("checksum mismatch for %s", url)
+		}
+	}
+	return nil
 }
 
 // unzip unpacks an archive into dir, refusing anything that would land outside
@@ -651,15 +699,22 @@ func (p *Pending) Discard() { os.RemoveAll(p.tmp) }
 func (p *Pending) Install(dir string) error {
 	defer os.RemoveAll(p.tmp)
 	target := filepath.Join(dir, p.Manifest.ID)
+	next := Origin{
+		Repo:        p.Repo,
+		Version:     p.Version,
+		FeedURL:     p.FeedURL,
+		DownloadURL: p.DownloadURL,
+		SHA256:      p.SHA256,
+	}
 	if _, err := os.Stat(target); err == nil {
 		var was Origin
 		readJSON(filepath.Join(target, originFile), &was)
-		if was.Repo != p.Repo {
+		if !sameOrigin(was, next) {
 			return fmt.Errorf("a plugin called %s is already installed", p.Manifest.ID)
 		}
 	}
-	if p.Repo != "" {
-		b, err := json.Marshal(Origin{Repo: p.Repo, Version: p.Version})
+	if next.Remote() {
+		b, err := json.Marshal(next)
 		if err != nil {
 			return err
 		}
@@ -702,7 +757,7 @@ func (p *Plugin) Dir() string { return p.dir }
 func (p *Plugin) Origin() *Origin {
 	var o Origin
 	readJSON(filepath.Join(p.dir, originFile), &o)
-	if o.Repo == "" {
+	if !o.Remote() {
 		return nil
 	}
 	return &o

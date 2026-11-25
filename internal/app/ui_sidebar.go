@@ -55,7 +55,8 @@ func (a *app) sidebar(cx *core.Scope, top core.Points) core.Node {
 // sourceRow follows MyGo's compact source selector: beside the traffic lights
 // on macOS, or a line above search elsewhere, only when plugins are installed.
 func (a *app) sourceRow(p palette, top, left core.Points) core.Node {
-	if len(a.plugins) == 0 {
+	enabled := a.enabledPlugins()
+	if len(enabled) == 0 {
 		return core.Group{}
 	}
 	style := core.Style{Height: core.Pt(24), Padding: core.Symmetric(0, 7), Gap: 4,
@@ -79,7 +80,7 @@ func (a *app) sourceRow(p palette, top, left core.Points) core.Node {
 	var items []core.Node
 	items = append(items, sourceMenuOption(p, "local", i18n.T("Local Files"),
 		func() bool { return a.source() == a.local }, func() { a.switchSource("local") }))
-	for _, plug := range a.plugins {
+	for _, plug := range enabled {
 		id := plug.Info().ID
 		items = append(items, sourceMenuOption(p, id, plug.Info().Name,
 			func() bool { return a.source().Info().ID == id }, func() { a.switchSource(id) }))

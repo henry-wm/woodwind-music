@@ -1,6 +1,11 @@
 package app
 
 import (
+	"archive/zip"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"github.com/HengWh/woodwind-music/internal/music"
 	"net/http"
@@ -117,7 +122,7 @@ func TestPhonePluginInstallReviewAndRemove(t *testing.T) {
 	ui.Press("id:phone-settings-plugins")
 	ui.Find("id:plugin-setting-demo/greeting")
 	ui.Type("id:plugin-setting-demo/greeting", "Hello wood wind")
-	ui.Press("id:plugin-save-demo/greeting")
+	ui.Key("enter")
 	ui.WaitUntil(time.Second, func() bool { return a.plugins[0].Setting("greeting") == "Hello wood wind" })
 	a.post(func() { a.installer.open = true; a.installer.remove = "demo"; a.bump() })
 	ui.Settle()
@@ -395,4 +400,199 @@ func TestSourceSwitcherMenuSurface(t *testing.T) {
 			})
 		}
 	}
+}
+
+func testPluginZip(t *testing.T, manifest, script string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, body := range map[string]string{
+		"plugin.json": manifest,
+		"index.js":    script,
+	} {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestPluginMyGoSettingsUIAndDisableSwitch(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", dir)
+	plugDir := filepath.Join(dir, "plugins", "typed")
+	if err := os.MkdirAll(plugDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"id": "typed",
+		"name": "Typed Source",
+		"version": "1.0.0",
+		"permissions": {"network": ["api.example.com"]},
+		"settings": [
+			{"key": "server", "label": "Server URL"},
+			{"key": "secret", "label": "API Token", "type": "password"},
+			{"key": "history", "label": "Save History", "type": "boolean"},
+			{"key": "mode", "label": "Auth Mode", "type": "select", "options": [
+				{"value": "token", "label": "Token"},
+				{"value": "legacy", "label": "Legacy"}
+			]}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(plugDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugDir, "index.js"), []byte(`export function suggest() { return ["ok"]; }`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var a *app
+	ui := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		a = newApp(cx)
+		a.settingsPage = "plugins"
+		return a.settingsView(cx)
+	}, nsgotest.Size(960, 680), nsgotest.Environment(core.Environment{OS: core.OSMacOS}))
+	t.Cleanup(a.closePlugins)
+	ui.Settle()
+
+	// Text setting saves automatically on Enter without a Save button.
+	ui.Type("id:plugin-setting-typed/server", "https://music.local")
+	ui.Key("enter")
+	ui.WaitUntil(time.Second, func() bool { return a.plugins[0].Setting("server") == "https://music.local" })
+
+	// Password setting is masked and does not save until Save changes is pressed.
+	ui.Type("id:plugin-setting-typed/secret", "top-secret")
+	ui.Settle()
+	if got := a.plugins[0].Setting("secret"); got != "" {
+		t.Fatalf("password saved before Save changes: %q", got)
+	}
+	ui.Press("id:plugin-save-typed/secret")
+	ui.WaitUntil(time.Second, func() bool { return a.plugins[0].Setting("secret") == "top-secret" })
+
+	// Boolean switch saves automatically.
+	ui.Press("id:plugin-setting-typed/history")
+	ui.WaitUntil(time.Second, func() bool { return a.plugins[0].Setting("history") == "true" })
+
+	// Select saves automatically (index 0 is unlisted empty current value, index 2 is Legacy).
+	ui.Press("id:plugin-setting-typed/mode")
+	ui.Press("id:plugin-setting-typed/mode-2")
+	ui.WaitUntil(time.Second, func() bool { return a.plugins[0].Setting("mode") == "legacy" })
+
+	// Disabling collapses settings and removes plugin from enabled sources.
+	ui.Press("id:plugin-enabled-typed")
+	ui.WaitUntil(time.Second, func() bool { return !a.pluginEnabled("typed") })
+	if ui.Exists("id:plugin-setting-typed/server") {
+		t.Fatal("disabled plugin still rendered its settings")
+	}
+	if len(a.enabledPlugins()) != 0 {
+		t.Fatal("disabled plugin remained in enabledPlugins")
+	}
+
+	// Re-enabling restores settings.
+	ui.Press("id:plugin-enabled-typed")
+	ui.WaitUntil(time.Second, func() bool { return a.pluginEnabled("typed") })
+	ui.Find("id:plugin-setting-typed/server")
+}
+
+func TestPluginFeedSubscriptionAndInlineNoPopupUpdates(t *testing.T) {
+	v1Zip := testPluginZip(t,
+		`{"id":"cloud","name":"Cloud Source","version":"1.0.0","permissions":{"network":["a.example.com"]}}`,
+		`export function suggest() { return ["v1"]; }`,
+	)
+	v2Zip := testPluginZip(t,
+		`{"id":"cloud","name":"Cloud Source","version":"1.1.0","permissions":{"network":["a.example.com"]}}`,
+		`export function suggest() { return ["v2"]; }`,
+	)
+	v3Zip := testPluginZip(t,
+		`{"id":"cloud","name":"Cloud Source","version":"1.2.0","permissions":{"network":["a.example.com","b.example.com"]}}`,
+		`export function suggest() { return ["v3"]; }`,
+	)
+
+	currentVer := "1.0.0"
+	currentZip := v1Zip
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/feed.json":
+			sum := sha256.Sum256(currentZip)
+			pure := true
+			json.NewEncoder(w).Encode(plugin.Feed{
+				Name: "Community Feed",
+				Plugins: []plugin.FeedEntry{{
+					ID:          "cloud",
+					Name:        "Cloud Source",
+					Version:     currentVer,
+					DownloadURL: srv.URL + "/cloud.zip",
+					SHA256:      hex.EncodeToString(sum[:]),
+					PureJS:      &pure,
+				}},
+			})
+		case "/cloud.zip":
+			w.Write(currentZip)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", dir)
+	var a *app
+	ui := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		a = newApp(cx)
+		a.settingsPage = "plugins"
+		return a.settingsView(cx)
+	}, nsgotest.Size(960, 720), nsgotest.Environment(core.Environment{OS: core.OSMacOS}))
+	t.Cleanup(a.closePlugins)
+	ui.Settle()
+
+	// Subscribe to JSON feed.
+	ui.Type("id:plugin-feed-url", srv.URL+"/feed.json")
+	ui.Press("id:plugin-feed-add")
+	ui.WaitUntil(2*time.Second, func() bool { return len(a.set.PluginFeeds) == 1 })
+	ui.Find("id:plugin-feed-install-cloud")
+
+	// Install from subscribed feed and confirm permissions.
+	ui.Press("id:plugin-feed-install-cloud")
+	ui.WaitUntil(2*time.Second, func() bool { return a.installer.pending != nil && !a.installer.busy })
+	ui.Press("id:plugin-confirm")
+	ui.WaitUntil(2*time.Second, func() bool { return len(a.plugins) == 1 && !a.installer.open })
+
+	// Feed publishes v1.1.0 with unchanged permissions -> quiet check shows badge + inline button, NO popup.
+	currentVer = "1.1.0"
+	currentZip = v2Zip
+	ui.Press("id:plugin-check-all")
+	ui.WaitUntil(2*time.Second, func() bool { return !a.installer.checkingAll && a.pluginUpdateCount() == 1 })
+	if a.installer.open {
+		t.Fatal("update check opened a popup dialog")
+	}
+	if badge := ui.Find("id:settings-badge-plugins").Text; badge != "1" {
+		t.Fatalf("settings badge = %q, want 1", badge)
+	}
+	ui.Press("id:plugin-update-cloud")
+	ui.WaitUntil(2*time.Second, func() bool { return a.plugins[0].Info().Version == "1.1.0" && a.pluginUpdateCount() == 0 })
+	if a.installer.open {
+		t.Fatal("same-permission update opened a popup dialog")
+	}
+
+	// Feed publishes v1.2.0 asking for a new network host -> inline confirmation inside card, still NO popup.
+	currentVer = "1.2.0"
+	currentZip = v3Zip
+	ui.Press("id:plugin-check-all")
+	ui.WaitUntil(2*time.Second, func() bool { return !a.installer.checkingAll && a.pluginUpdateCount() == 1 })
+	ui.Press("id:plugin-update-cloud")
+	ui.WaitUntil(2*time.Second, func() bool { return a.installer.pendingUpdates["cloud"] != nil })
+	if a.installer.open {
+		t.Fatal("permission-expanding update opened a popup instead of inline confirmation")
+	}
+	ui.Find("id:plugin-update-prompt-cloud")
+	ui.Press("id:plugin-update-confirm-cloud")
+	ui.WaitUntil(2*time.Second, func() bool { return a.plugins[0].Info().Version == "1.2.0" && a.pluginUpdateCount() == 0 })
 }

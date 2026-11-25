@@ -27,17 +27,27 @@ type settingsRowDef struct {
 	control func(p palette) core.Node
 }
 
-// settingsGroupDef is related rows under a title.
+// settingsBlockDef is a rich block inside a settings card (such as a plugin's
+// MyGo-style configuration section), searchable by searchText.
+type settingsBlockDef struct {
+	searchText string
+	render     func(p palette) core.Node
+}
+
+// settingsGroupDef is related rows or blocks under a title.
 type settingsGroupDef struct {
-	title string
-	rows  []settingsRowDef
+	title  string
+	rows   []settingsRowDef
+	blocks []settingsBlockDef
 }
 
 // settingsCatDef is a page of the settings, in the sidebar.
 type settingsCatDef struct {
-	id, label string
-	icon      *core.SVG
-	groups    []settingsGroupDef
+	id, label    string
+	icon         *core.SVG
+	badge        string
+	headerAction func(p palette) core.Node
+	groups       []settingsGroupDef
 }
 
 // qualityLevels are what can be asked of sources, by what they sound like.
@@ -120,7 +130,7 @@ func (a *app) settingsLayout(cx *core.Scope, p palette, cats []settingsCatDef) c
 				page = append(page, a.settingsResults(p, cats, query)...)
 			default:
 				for _, g := range current.groups {
-					if len(g.rows) > 0 {
+					if len(g.rows) > 0 || len(g.blocks) > 0 {
 						page = append(page, a.settingsGroupCard(p, g))
 					}
 				}
@@ -133,6 +143,17 @@ func (a *app) settingsLayout(cx *core.Scope, p palette, cats []settingsCatDef) c
 			if query != "" {
 				title = i18n.T("Search Results")
 			}
+			headerChildren := []core.Node{
+				core.Show{When: func() bool { return a.settingsInMain }, Then: func(cx *core.Scope) core.Node {
+					return base.Button{Label: i18n.T("Back"), TestID: "settings-back", OnPress: func(core.PressEvent) { a.closeSettings() },
+						Style: core.Style{Width: core.Pt(32), Height: core.Pt(32), Margin: core.Edges{Right: 8},
+							AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, Children: []core.Node{icon(lucideChevronLeft, 16, p.text)}}
+				}},
+				core.Text{Content: title, MaxLines: 1, Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), FontSize: 15, FontWeight: core.FontWeightBold, Color: p.text}},
+			}
+			if query == "" && current.headerAction != nil {
+				headerChildren = append(headerChildren, current.headerAction(p))
+			}
 			under := core.NewSignal(cx, false)
 			return core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, FlexBasis: core.Pt(0), MinHeight: core.Pt(0), Direction: core.Column}, Children: []core.Node{
 				core.Scroll{TestID: "settings-content", Style: core.Style{FlexGrow: 1, FlexBasis: core.Pt(0), MinHeight: core.Pt(0)},
@@ -142,20 +163,13 @@ func (a *app) settingsLayout(cx *core.Scope, p palette, cats []settingsCatDef) c
 					}},
 				core.View{StyleFunc: func() core.Style {
 					s := core.Style{Position: core.Absolute, Top: core.Pt(0), Left: core.Pt(0), Right: core.Pt(0), Height: core.Pt(top),
-						Direction: core.Row, AlignItems: core.AlignCenter,
+						Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
 						Padding: core.Edges{Left: 32, Right: max(32, desktop.TitleBar(cx).Right+12)}, Background: p.bg}
 					if under.Get() {
 						s.Borders, s.BorderColor = core.Edges{Bottom: 1}, p.hairline
 					}
 					return s
-				}, Desktop: core.DesktopViewProps{WindowDrag: core.WindowDragOn}, Children: []core.Node{
-					core.Show{When: func() bool { return a.settingsInMain }, Then: func(cx *core.Scope) core.Node {
-						return base.Button{Label: i18n.T("Back"), TestID: "settings-back", OnPress: func(core.PressEvent) { a.closeSettings() },
-							Style: core.Style{Width: core.Pt(32), Height: core.Pt(32), Margin: core.Edges{Right: 8},
-								AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, Children: []core.Node{icon(lucideChevronLeft, 16, p.text)}}
-					}},
-					core.Text{Content: title, MaxLines: 1, Style: core.Style{FlexShrink: 1, MinWidth: core.Pt(0), FontSize: 15, FontWeight: core.FontWeightBold, Color: p.text}},
-				}},
+				}, Desktop: core.DesktopViewProps{WindowDrag: core.WindowDragOn}, Children: headerChildren},
 			}}
 		})}}
 	divider := core.View{Style: core.Style{Width: core.Pt(1), FlexShrink: 0, Background: p.hairline}}
@@ -194,11 +208,23 @@ func (a *app) settingsNavItem(p palette, c settingsCatDef, selected bool) core.N
 	} else {
 		style.Hover = &core.Style{Background: p.hover}
 	}
+	children := []core.Node{
+		icon(c.icon, 15, fg),
+		core.Text{Content: c.label, MaxLines: 1, Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), FontSize: 13, FontWeight: core.FontWeightMedium, Color: p.text}},
+	}
+	if c.badge != "" {
+		children = append(children, settingsBadge(p, "settings-badge-"+c.id, c.badge))
+	}
 	return base.Button{Label: c.label, TestID: "settings-nav-" + c.id, OnPress: func(core.PressEvent) {
 		a.settingsPage, a.settingsQuery = c.id, ""
 		a.bump()
-	}, Selected: func() bool { return selected }, Style: style,
-		Children: []core.Node{icon(c.icon, 15, fg), text(c.label, 13, core.FontWeightMedium, p.text)}}
+	}, Selected: func() bool { return selected }, Style: style, Children: children}
+}
+
+func settingsBadge(p palette, testID, label string) core.Node {
+	return core.View{Style: core.Style{MinWidth: core.Pt(18), Height: core.Pt(18), Padding: core.Symmetric(0, 6),
+		CornerRadius: 9, Background: p.accent, FlexShrink: 0, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
+		Children: []core.Node{core.Text{TestID: testID, Content: label, Style: core.Style{FontSize: 11, FontWeight: core.FontWeightSemibold, Color: p.onAccent}}}}
 }
 
 // settingsResults shows the rows a search finds, under their page's name.
@@ -213,10 +239,16 @@ func (a *app) settingsResults(p palette, cats []settingsCatDef, query string) []
 					rows = append(rows, r)
 				}
 			}
-			if len(rows) == 0 {
+			var blocks []settingsBlockDef
+			for _, b := range g.blocks {
+				if all || settingsMatch(query, b.searchText) {
+					blocks = append(blocks, b)
+				}
+			}
+			if len(rows) == 0 && len(blocks) == 0 {
 				continue
 			}
-			out = append(out, a.settingsGroupCard(p, settingsGroupDef{title: c.label, rows: rows}))
+			out = append(out, a.settingsGroupCard(p, settingsGroupDef{title: c.label, rows: rows, blocks: blocks}))
 		}
 	}
 	return out
@@ -238,8 +270,19 @@ func (a *app) settingsGroupCard(p palette, g settingsGroupDef) core.Node {
 		children = append(children, core.View{Style: core.Style{Margin: core.Edges{Top: 14, Right: 4, Bottom: 4, Left: 4}},
 			Children: []core.Node{text(g.title, 12, core.FontWeightSemibold, p.muted)}})
 	}
-	var rows []core.Node
-	for i, r := range g.rows {
+	var items []core.Node
+	total := len(g.blocks) + len(g.rows)
+	idx := 0
+	for _, b := range g.blocks {
+		item := core.View{Style: core.Style{Direction: core.Column}, Children: []core.Node{b.render(p)}}
+		if idx < total-1 {
+			item.Style.Borders = core.Edges{Bottom: 1}
+			item.Style.BorderColor = p.hairline
+		}
+		items = append(items, item)
+		idx++
+	}
+	for _, r := range g.rows {
 		var children []core.Node
 		if r.control != nil {
 			children = append(children, r.control(p))
@@ -276,14 +319,15 @@ func (a *app) settingsGroupCard(p palette, g settingsGroupDef) core.Node {
 				row.Style.AlignItems = core.AlignCenter
 			}
 		}
-		if i < len(g.rows)-1 {
+		if idx < total-1 {
 			row.Style.Borders = core.Edges{Bottom: 1}
 			row.Style.BorderColor = p.hairline
 		}
-		rows = append(rows, row)
+		items = append(items, row)
+		idx++
 	}
 	children = append(children, core.View{Style: core.Style{Direction: core.Column, Background: p.bg, CornerRadius: 12,
-		BorderWidth: 1, BorderColor: p.hairline, Overflow: core.Hidden}, Children: rows})
+		BorderWidth: 1, BorderColor: p.hairline, Overflow: core.Hidden}, Children: items})
 	return core.View{Style: core.Style{Direction: core.Column}, Children: children}
 }
 

@@ -112,8 +112,12 @@ type settings struct {
 	// StageStyle is how the stage sets its lyrics: Flow, Steps or Tilt.
 	StageStyle string `json:"stageStyle,omitempty"`
 	// StageSparks throws sparks off each word as it is sung.
-	StageSparks   bool                  `json:"stageSparks,omitempty"`
-	DesktopLyrics desktopLyricsSettings `json:"desktopLyrics"`
+	StageSparks     bool                  `json:"stageSparks,omitempty"`
+	DesktopLyrics   desktopLyricsSettings `json:"desktopLyrics"`
+	DisabledPlugins []string              `json:"disabledPlugins,omitempty"`
+	PluginsChecked  time.Time             `json:"pluginsChecked,omitzero"`
+	PluginUpdates   map[string]string     `json:"pluginUpdates,omitempty"`
+	PluginFeeds     []pluginFeedSub       `json:"pluginFeeds,omitempty"`
 
 	path string
 }
@@ -214,6 +218,12 @@ type app struct {
 	active              music.Source
 	plugins             []*plugin.Plugin
 	installer           pluginInstaller
+	settingText         map[string]*string
+	settingEdits        map[string]*settingEdit
+	settingPending      map[string]*settingWrite
+	settingSaves        map[*plugin.Plugin]<-chan struct{}
+	settingDraftRev     *core.Signal[int]
+	pluginCheckTimer    *time.Timer
 	account             *music.Account
 	accounts            map[string]*sourceAccount
 	signingIn           bool
@@ -380,6 +390,7 @@ func newApp(cx *core.Scope) *app {
 		searchRef:        new(core.Ref),
 		settingsRef:      new(core.Ref),
 		settingsQueryRev: core.NewSignal(cx, 0),
+		settingDraftRev:  core.NewSignal(cx, 0),
 		cacheUsed:        -1,
 		likedSet:         map[string]bool{},
 		playlists:        map[string]*playlistData{},
@@ -410,6 +421,7 @@ func newApp(cx *core.Scope) *app {
 		})
 	})
 	a.initSources()
+	a.schedulePluginUpdateChecks()
 	a.pl = player.New(func(fn func()) { a.post(fn) })
 	cx.Cleanup(a.close)
 	if cx.Env().OS() == core.OSAndroid {
@@ -497,6 +509,10 @@ func (a *app) close() {
 	}
 	if a.disk != nil {
 		a.disk.Close()
+	}
+	if a.pluginCheckTimer != nil {
+		a.pluginCheckTimer.Stop()
+		a.pluginCheckTimer = nil
 	}
 	a.closePlugins()
 }

@@ -287,7 +287,7 @@ func (a *app) phoneSources(p palette) core.Node {
 	a.sources.RLock()
 	var sources []music.Source
 	for id, src := range a.sources.items {
-		if id != "local" {
+		if id != "local" && a.pluginEnabled(id) {
 			sources = append(sources, src)
 		}
 	}

@@ -17,6 +17,7 @@ type settingsChoice[T comparable] struct {
 	Options  []ui.Option[T]
 	Value    func() T
 	OnChange func(T)
+	Disabled func() bool
 	Label    string
 	TestID   string
 	Style    core.Style
@@ -47,7 +48,7 @@ func (s settingsChoice[T]) Render(cx *core.Scope) core.Node {
 		valueColor = p.muted
 		align = core.TextAlignEnd
 	}
-	return base.Select{Label: s.Label, TestID: s.TestID,
+	return base.Select{Label: s.Label, TestID: s.TestID, Disabled: s.Disabled,
 		Items: func() []base.SelectItem {
 			items := make([]base.SelectItem, len(s.Options))
 			for i, o := range s.Options {
@@ -103,6 +104,7 @@ type settingsSwitch struct {
 	Touch    bool
 	Checked  func() bool
 	OnChange func(bool)
+	Disabled func() bool
 	Label    string
 	TestID   string
 }
@@ -113,7 +115,7 @@ func (s settingsSwitch) Render(cx *core.Scope) core.Node {
 	if s.Touch {
 		minHeight = 48
 	}
-	return base.Switch{Checked: s.Checked, OnChange: s.OnChange, Label: s.Label, TestID: s.TestID,
+	return base.Switch{Checked: s.Checked, OnChange: s.OnChange, Disabled: s.Disabled, Label: s.Label, TestID: s.TestID,
 		Style: core.Style{MinHeight: core.Pt(minHeight), JustifyContent: core.JustifyCenter, FlexShrink: 0, Padding: core.Symmetric(4, 0),
 			FocusVisible: &core.Style{OutlineWidth: 3, OutlineColor: ui.Alpha(p.accent, 0.25), CornerRadius: 12}},
 		TrackStyle: core.Style{Width: core.Pt(32), Height: core.Pt(18), Padding: core.All(2), CornerRadius: 9,
