@@ -17,12 +17,9 @@ import (
 )
 
 func TestMusicVideoFromSongList(t *testing.T) {
-	for _, compact := range []bool{false, true} {
-		name := "desktop"
-		if compact {
-			name = "android"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, platform := range []core.OS{core.OSMacOS, core.OSWindows, core.OSAndroid} {
+		t.Run(string(platform), func(t *testing.T) {
+			compact := platform == core.OSAndroid
 			dir := t.TempDir()
 			t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", dir)
 			media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,10 +59,11 @@ export function mvStream({id}) {
 			}
 			host.Handle("playback.update", func(call *core.HostCall) { call.Resolve(nil) })
 			size := nsgotest.Size(1180, 780)
-			env := core.Environment{}
+			env := core.Environment{OS: platform}
 			if compact {
 				size = nsgotest.Size(390, 844)
-				env.OS = core.OSAndroid
+			} else if platform == core.OSWindows {
+				env.TitleBar = core.Edges{Top: 40, Right: 100}
 			}
 			var a *app
 			ui := nsgotest.Start(t, func(cx *core.Scope) core.Node {
@@ -132,6 +130,14 @@ export function mvStream({id}) {
 				}
 				ui.Back()
 			} else {
+				const progress = "id:mv-progress"
+				width := ui.Find(progress).Frame.Size.Width
+				ui.Drag(progress, core.Point{X: width / 4})
+				if len(v.Seeks) != 1 || v.Seeks[0] < 44*time.Second || v.Seeks[0] > 46*time.Second || a.pl.Position() != position {
+					t.Fatalf("MV progress drag reached music or failed: %v", v.Seeks)
+				}
+				ui.Report(nsgotest.Event{Kind: nsgotest.EventProgress, ID: v.ID, Time: 45 * time.Second, Duration: time.Minute})
+				ui.WaitUntil(time.Second, func() bool { return ui.Find("id:mv-elapsed").Text == "0:45" })
 				ui.Press("id:mv-close")
 			}
 			ui.WaitUntil(time.Second, func() bool { return !ui.Exists("id:mv-player") && a.pl.Playing() })
