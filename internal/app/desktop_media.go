@@ -10,6 +10,9 @@ import (
 func (a *app) setupDesktopMedia() {
 	controls := nowplaying.Bind(a.cx, func(cmd nowplaying.Command, pos time.Duration) {
 		a.post(func() {
+			if a.mvCommand(cmd, pos) {
+				return
+			}
 			switch cmd {
 			case nowplaying.Play:
 				if !a.pl.Playing() {

@@ -278,7 +278,8 @@ func (a *app) trackRow(p palette, tracks []music.Track, i int, showCover bool, s
 		core.View{Style: core.Style{Display: heart,
 			GroupStyle: &core.GroupStyle{Name: trackRowGroup, Hover: &core.Style{Display: core.DisplayFlex}}},
 			Children: []core.Node{a.likeButton(p, tr, 15, p.muted)}}}})
-	children = append(children, core.Text{Content: clock(tr.Length()), Style: core.Style{Width: core.Pt(44), TextAlign: core.TextAlignEnd, FontSize: 12.5, Color: p.faint}})
+	children = append(children, a.trackMVButton(p, func() music.Track { return tr }, "track-mv-"+tr.ID, false),
+		core.Text{Content: clock(tr.Length()), Style: core.Style{Width: core.Pt(44), TextAlign: core.TextAlignEnd, FontSize: 12.5, Color: p.faint}})
 	row.Children = children
 	return row
 }

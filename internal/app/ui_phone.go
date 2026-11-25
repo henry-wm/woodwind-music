@@ -331,6 +331,7 @@ func (a *app) phoneTrackRow(p palette, tracks []music.Track, i int, playlist str
 					core.Text{Content: phoneTrackSubtitle(tr), MaxLines: 1, Style: core.Style{FontSize: phoneFontCaption, Color: p.muted}},
 				}},
 			}},
+		a.trackMVButton(p, func() music.Track { return tr }, "track-mv-"+tr.ID, true),
 		a.phoneIcon(p, "track-more-"+tr.ID, i18n.T("More"), lucideMore, p.muted, func() { a.openPhoneTrack(tr, playlist, i) }),
 	}}
 }

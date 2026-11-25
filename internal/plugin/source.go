@@ -306,6 +306,22 @@ func (p *Plugin) Stream(id, quality string) (*music.Stream, error) {
 	return &s, nil
 }
 
+func (p *Plugin) TrackMVs(ids []string) (map[string]string, error) {
+	var refs map[string]string
+	if err := p.call("trackMVs", map[string][]string{"ids": ids}, &refs); err != nil {
+		return nil, err
+	}
+	return refs, nil
+}
+
+func (p *Plugin) MVStream(id string) (*music.Stream, error) {
+	var stream music.Stream
+	if err := p.call("mvStream", map[string]string{"id": id}, &stream); err != nil {
+		return nil, err
+	}
+	return &stream, nil
+}
+
 func (p *Plugin) RemotePlay(ids []string, start int, position int64) error {
 	return p.call("remotePlay", map[string]any{"ids": ids, "start": start, "position": position}, nil)
 }

@@ -399,6 +399,14 @@ type LibraryRadio interface {
 	StationNextFrom(station string, seeds []Track) ([]Track, error)
 }
 
+// MVSource is an optional source capability. TrackMVs returns only the tracks
+// that have a music video, keyed by the source's track IDs.
+type MVSource interface {
+	Source
+	TrackMVs(ids []string) (map[string]string, error)
+	MVStream(id string) (*Stream, error)
+}
+
 // Source is where music comes from. Everything but Info and Can may take a
 // while and is called off the main thread. A source that doesn't do something
 // answers ErrUnsupported, and Can says so beforehand for the views to leave it

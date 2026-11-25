@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"time"
 
+	"github.com/HengWh/woodwind-music/internal/nowplaying"
 	"github.com/HengWh/woodwind-music/internal/player"
 )
 
@@ -30,6 +31,9 @@ func (a *app) setupAndroidMedia() {
 	a.pl.System.Clear = func() { a.cx.PostHost("playback.update", map[string]any{"hasTrack": false}) }
 	a.cx.OnHostEvent("android.lifecycle", func(data any) {
 		if event, ok := data.(map[string]any); ok {
+			if event["background"] == true {
+				a.closeMV(true)
+			}
 			if zone, ok := event["timeZone"].(string); ok && zone != "" && (a.location == nil || a.location.String() != zone) {
 				a.location = deviceLocation(zone)
 				a.bump()
@@ -45,6 +49,21 @@ func (a *app) setupAndroidMedia() {
 		command, _ := m["command"].(string)
 		if command != "focus-pause" && command != "focus-resume" {
 			a.cancelFocusResume()
+		}
+		if r := a.mv.GetUntracked(); r != nil && r.started && r.source.GetUntracked() != "" {
+			switch command {
+			case "play":
+				a.mvCommand(nowplaying.Play, 0)
+			case "pause", "stop":
+				a.mvCommand(nowplaying.Pause, 0)
+			case "toggle":
+				a.mvCommand(nowplaying.Toggle, 0)
+			case "seek":
+				if ms, ok := m["position"].(float64); ok {
+					a.mvCommand(nowplaying.Seek, time.Duration(ms)*time.Millisecond)
+				}
+			}
+			return
 		}
 		switch command {
 		case "play":

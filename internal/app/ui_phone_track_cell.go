@@ -46,6 +46,7 @@ func (a *app) phoneTrackCell(cx *core.Scope, p palette, tracks func() []music.Tr
 					core.Text{ContentFunc: func() string { return phoneTrackSubtitle(track()) }, MaxLines: 1, Style: core.Style{FontSize: phoneFontCaption, Color: p.muted}},
 				}},
 			}},
+		a.trackMVButton(p, track, "phone-track-mv", true),
 		base.Button{TestID: "phone-track-more", LabelFunc: func() string { return i18n.Tf("More: %s", track().Name) }, OnPress: func(core.PressEvent) {
 			list, i := tracks(), row.Index()
 			if i >= 0 && i < len(list) {

@@ -233,6 +233,9 @@ type app struct {
 	pickingSAF   bool
 	pl           *player.Player
 	video        *videoOutput
+	mv           *core.Signal[*mvPlayback]
+	mvRev        *core.Signal[int]
+	mvLookups    map[string]*mvLookup
 	importing    bool
 	androidMedia *androidMedia
 
@@ -350,6 +353,9 @@ func newApp(cx *core.Scope) *app {
 		set:              loadSettings(dir),
 		rev:              core.NewSignal(cx, 0),
 		playRev:          core.NewSignal(cx, 0),
+		mv:               core.NewSignal[*mvPlayback](cx, nil),
+		mvRev:            core.NewSignal(cx, 0),
+		mvLookups:        map[string]*mvLookup{},
 		modeRev:          core.NewSignal(cx, 0),
 		speedRev:         core.NewSignal(cx, 0),
 		sleepRev:         core.NewSignal(cx, 0),
@@ -443,7 +449,13 @@ func newApp(cx *core.Scope) *app {
 			a.diskErr = err.Error()
 		}
 	}
-	a.pl.Changed = func() { a.heartbeat(); a.playRev.Update(func(n int) int { return n + 1 }) }
+	a.pl.Changed = func() {
+		if r := a.mv.GetUntracked(); r != nil && r.started && a.pl.Playing() {
+			a.closeMV(false)
+		}
+		a.heartbeat()
+		a.playRev.Update(func(n int) int { return n + 1 })
+	}
 	a.setupOfflineNetwork()
 	a.pl.SleepTimerChanged = func() {
 		a.sleepRev.Update(func(n int) int { return n + 1 })
@@ -452,6 +464,7 @@ func newApp(cx *core.Scope) *app {
 	a.pl.SleepTimerExpired = func() {
 		a.cancelFocusResume()
 		a.cancelRadioStart()
+		a.closeMV(false)
 		a.saveSession()
 		a.say(i18n.T("Sleep timer ended. Playback paused."))
 	}
@@ -477,6 +490,7 @@ func newApp(cx *core.Scope) *app {
 }
 
 func (a *app) close() {
+	a.closeMV(false)
 	if a.pl != nil {
 		a.pl.Close()
 	}
@@ -934,6 +948,9 @@ func (a *app) playTracks(tracks []music.Track, i int) {
 }
 
 func (a *app) toggle() {
+	if a.mvCommand(nowplaying.Toggle, 0) {
+		return
+	}
 	a.cancelFocusResume()
 	a.pl.TogglePlay()
 	a.heartbeat()
@@ -1374,7 +1391,7 @@ func (a *app) view(cx *core.Scope) core.Node {
 		}
 		return root
 	})
-	content = core.Group{content, a.pluginDialogs(a.cx, false)}
+	content = core.Group{content, a.pluginDialogs(a.cx, false), a.mvView()}
 	if a.video != nil {
 		// Keep the media node and the UI under one stable attached root,
 		// independently of the content's redraw scopes.
@@ -1398,6 +1415,7 @@ func (a *app) setup(cx *core.Scope) {
 		})
 		cx.OnBackPress(func() bool {
 			switch {
+			case a.closeMV(true):
 			case a.signingIn:
 				a.cancelSignIn()
 			case a.installer.open:
@@ -1464,10 +1482,21 @@ func (a *app) shortcuts(cx *core.Scope) {
 	if a.supportsDesktopLyrics() {
 		cx.OnKey("mod+shift+l", a.toggleDesktopLyrics)
 	}
-	cx.OnKey("mod+left", a.pl.Prev)
-	cx.OnKey("mod+right", a.pl.Next)
+	cx.OnKey("mod+left", func() {
+		if !a.mvCommand(nowplaying.Previous, 0) {
+			a.pl.Prev()
+		}
+	})
+	cx.OnKey("mod+right", func() {
+		if !a.mvCommand(nowplaying.Next, 0) {
+			a.pl.Next()
+		}
+	})
 	// Let menus and other overlays consume Escape before closing a page.
 	cx.OnBackPress(func() bool {
+		if a.closeMV(true) {
+			return true
+		}
 		if a.phoneSheet.GetUntracked() != "" {
 			a.phoneSheet.Set("")
 			return true
