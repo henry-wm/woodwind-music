@@ -104,8 +104,8 @@ export function mvStream({id}) {
 			ui.Press("label:Play MV for With MV")
 			ui.WaitUntil(2*time.Second, func() bool { return ui.Exists("id:mv-video") })
 			v := ui.FindMounted("id:mv-video")
-			if !v.Video.Paused || !a.pl.Playing() || !v.Video.Controls {
-				t.Fatal("video should be held while loading, with controls ready")
+			if !v.Video.Paused || !a.pl.Playing() || !ui.Exists("id:mv-progress") {
+				t.Fatal("video should be held while loading and expose its own controls")
 			}
 			req, err := http.NewRequest(http.MethodGet, v.Video.Source, nil)
 			if err != nil {

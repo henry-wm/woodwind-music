@@ -24,10 +24,15 @@ type mvPlayback struct {
 	source      *core.Signal[string]
 	status      *core.Signal[string]
 	paused      *core.Signal[bool]
+	progress    *core.Signal[mvProgress]
 	ref         core.Ref
 	started     bool
 	resumeTrack string
 	relay       *music.StreamRelay
+}
+
+type mvProgress struct {
+	position, duration time.Duration
 }
 
 func (a *app) mvSource(track music.Track) music.MVSource {
@@ -128,10 +133,11 @@ func (a *app) openMV(track music.Track, src music.MVSource, id string) {
 		return
 	}
 	r := &mvPlayback{
-		track:  track,
-		source: core.NewSignal(a.cx, ""),
-		status: core.NewSignal(a.cx, i18n.T("Loading MV…")),
-		paused: core.NewSignal(a.cx, true),
+		track:    track,
+		source:   core.NewSignal(a.cx, ""),
+		status:   core.NewSignal(a.cx, i18n.T("Loading MV…")),
+		paused:   core.NewSignal(a.cx, true),
+		progress: core.NewSignal(a.cx, mvProgress{}),
 	}
 	a.mv.Set(r)
 	go func() {
@@ -168,16 +174,18 @@ func (a *app) failMV(r *mvPlayback) {
 	r.paused.Set(true)
 	r.source.Set("")
 	r.status.Set(i18n.T("Could not play this MV."))
+	r.progress.Set(mvProgress{})
 	if r.relay != nil {
 		r.relay.Close()
 		r.relay = nil
 	}
 }
 
-func (a *app) startMV(r *mvPlayback) {
+func (a *app) startMV(r *mvPlayback, duration time.Duration) {
 	if r.started {
 		return
 	}
+	r.progress.Set(mvProgress{duration: duration})
 	r.started = true
 	a.cancelFocusResume()
 	if a.pl.Playing() {
@@ -217,9 +225,50 @@ func (a *app) mvCommand(command nowplaying.Command, pos time.Duration) bool {
 	case nowplaying.Toggle:
 		r.paused.Update(func(paused bool) bool { return !paused })
 	case nowplaying.Seek:
-		r.ref.Seek(pos)
+		r.seek(pos)
 	}
 	return true
+}
+
+func (r *mvPlayback) seek(position time.Duration) {
+	duration := r.progress.GetUntracked().duration
+	if duration > 0 {
+		r.ref.Seek(min(max(0, position), duration))
+	}
+}
+
+func (a *app) mvControls(p palette, r *mvPlayback) core.Node {
+	timeText := func(id string, value func(mvProgress) time.Duration) core.Node {
+		return core.Text{TestID: id, ContentFunc: func() string { return clock(value(r.progress.Get())) },
+			Style: core.Style{MinWidth: core.Pt(36), FontSize: 12, Color: p.muted}}
+	}
+	return core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10, Padding: core.Symmetric(4, 12)},
+		Children: []core.Node{
+			base.Button{TestID: "mv-play-pause", Label: i18n.T("Play/Pause"), OnPress: func(core.PressEvent) { a.mvCommand(nowplaying.Toggle, 0) },
+				Disabled: func() bool { return r.status.Get() != "" },
+				Style: core.Style{Width: core.Pt(48), Height: core.Pt(48), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+					CornerRadius: 24, Hover: &core.Style{Background: p.hover}, Active: &core.Style{Background: p.press}},
+				Children: []core.Node{core.Dynamic(func(*core.Scope) core.Node {
+					glyph := lucidePlay
+					if !r.paused.Get() {
+						glyph = lucidePause
+					}
+					return icon(glyph, 20, p.text)
+				})}},
+			timeText("mv-elapsed", func(t mvProgress) time.Duration { return t.position }),
+			base.Slider{TestID: "mv-progress", Label: i18n.T("Progress"),
+				Value:          func() base.SliderValue { return base.SingleValue(r.progress.Get().position.Seconds()) },
+				Max:            func() float64 { return max(1, r.progress.Get().duration.Seconds()) },
+				Disabled:       func() bool { return r.progress.Get().duration <= 0 },
+				OnChangeEnd:    func(v base.SliderValue) { r.seek(time.Duration(v.End * float64(time.Second))) },
+				ValueText:      func(v float64) string { return clock(time.Duration(v * float64(time.Second))) },
+				Style:          core.Style{Height: core.Pt(40), FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)},
+				TrackStyle:     core.Style{Height: core.Pt(40)},
+				IndicatorStyle: core.Style{Height: core.Pt(4), Margin: core.Edges{Top: 18}, CornerRadius: 2, Background: p.press},
+				RangeStyle:     core.Style{Height: core.Pt(4), CornerRadius: 2, Background: p.accent},
+				ThumbStyle:     core.Style{Width: core.Pt(10), Height: core.Pt(10), CornerRadius: 5, Background: p.accent}},
+			timeText("mv-duration", func(t mvProgress) time.Duration { return t.duration }),
+		}}
 }
 
 func (a *app) mvView() core.Node {
@@ -256,15 +305,23 @@ func (a *app) mvView() core.Node {
 						if source == "" {
 							return nil
 						}
-						return core.Video{TestID: "mv-video", Source: source, Ref: &r.ref, Controls: true, PausedFunc: r.paused.Get,
+						return core.Video{TestID: "mv-video", Source: source, Ref: &r.ref, PausedFunc: r.paused.Get,
 							AudioSession: core.AudioSessionPlayback,
 							MutedFunc:    func() bool { a.rev.Get(); return a.pl.Volume() == 0 },
 							VolumeFunc: func() float32 {
 								a.rev.Get()
 								return float32(a.pl.Volume() * a.pl.Volume())
 							},
-							Style:   core.Style{Width: core.Pct(100), Height: core.Pct(100)},
-							OnLoad:  func(core.VideoInfo) { onVideo(func() { a.startMV(r) }) },
+							Style:  core.Style{Width: core.Pct(100), Height: core.Pct(100)},
+							OnLoad: func(info core.VideoInfo) { onVideo(func() { a.startMV(r, info.Duration) }) },
+							OnProgress: func(position, duration time.Duration) {
+								onVideo(func() {
+									if duration <= 0 {
+										duration = r.progress.GetUntracked().duration
+									}
+									r.progress.Set(mvProgress{max(0, position), duration})
+								})
+							},
 							OnEnd:   func() { onVideo(func() { r.paused.Set(true) }) },
 							OnPlay:  func() { onVideo(func() { r.paused.Set(false) }) },
 							OnPause: func(core.VideoPauseReason) { onVideo(func() { r.paused.Set(true) }) },
@@ -275,6 +332,7 @@ func (a *app) mvView() core.Node {
 							Style: core.Style{Position: core.Absolute, FontSize: 14, Color: core.RGB(0xffffff)}}
 					}},
 				}},
+				a.mvControls(p, r),
 			}}
 	})
 }
