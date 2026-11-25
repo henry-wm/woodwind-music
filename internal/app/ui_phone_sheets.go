@@ -223,6 +223,22 @@ func (a *app) phoneActions(cx *core.Scope, p palette, kind string) core.Node {
 				}
 				body = append(body, text(i18n.T("Music source")+" · "+name, phoneFontBody, core.FontWeightNormal, p.muted))
 			}
+			if a.disk != nil {
+				if r, ok := a.disk.Get(tr); ok && len(r.Variants) > 0 {
+					if a.sourceByID(r.Track.Source) == nil {
+						body = append(body, text(i18n.T("Music source")+" · "+a.storedSourceLabel(r), phoneFontBody, core.FontWeightNormal, p.muted))
+					}
+					for _, v := range r.Variants {
+						body = append(body, text(variantLabel(v)+" · "+bytesLabel(v.Stream.Size), phoneFontBody, core.FontWeightNormal, p.muted))
+					}
+					if r.Cover == "" {
+						body = append(body, text(i18n.T("Missing Cover"), phoneFontBody, core.FontWeightNormal, p.muted))
+					}
+					if r.Lyrics == nil {
+						body = append(body, text(i18n.T("Missing Lyrics"), phoneFontBody, core.FontWeightNormal, p.muted))
+					}
+				}
+			}
 			if current := a.pl.Current(); current != nil && current.ID == tr.ID && current.Source == tr.Source {
 				if stream := a.pl.Stream(); stream != nil {
 					label := strings.ToUpper(stream.Type)
@@ -236,6 +252,9 @@ func (a *app) phoneActions(cx *core.Scope, p palette, kind string) core.Node {
 		default:
 			for i, node := range a.storedMenu(tr) {
 				if item, ok := node.(ui.MenuItem); ok {
+					if item.Text == i18n.T("Song Info") {
+						continue
+					}
 					body = append(body, a.phoneSheetAction(p, fmt.Sprintf("phone-stored-action-%d", i), item.Text, lucideFolder, close(item.OnSelect)))
 				}
 			}

@@ -64,6 +64,12 @@ var (
 	lucideTimer        = lucide.Timer()
 	lucideArrowUp      = lucide.ArrowUp()
 	lucideArrowDown    = lucide.ArrowDown()
+	lucideDownload     = lucide.Download()
+	lucideListChecks   = lucide.ListChecks()
+	lucideSquare       = lucide.Square()
+	lucideSquareCheck  = lucide.SquareCheck()
+	lucidePin          = lucide.Pin()
+	lucideRotateCcw    = lucide.RotateCcw()
 )
 
 func (a *app) palette(cx *core.Scope) palette {
