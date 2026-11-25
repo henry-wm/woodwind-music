@@ -43,6 +43,7 @@ var (
 	lucideDisc         = lucide.Disc3()
 	lucideUser         = lucide.User()
 	lucidePlay         = lucide.Play()
+	mvPlayIcon         = core.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 18"><rect x="1.25" y="1.25" width="21.5" height="15.5" rx="3.8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.3 5.9v6.2q0 .8.69.4l5.42-3.1q.69-.4 0-.8L9.99 5.5q-.69-.4-.69.4Z" fill="currentColor"/></svg>`))
 	lucidePause        = lucide.Pause()
 	lucidePrev         = lucide.SkipBack()
 	lucideNext         = lucide.SkipForward()
@@ -63,6 +64,12 @@ var (
 	lucideTimer        = lucide.Timer()
 	lucideArrowUp      = lucide.ArrowUp()
 	lucideArrowDown    = lucide.ArrowDown()
+	lucideDownload     = lucide.Download()
+	lucideListChecks   = lucide.ListChecks()
+	lucideSquare       = lucide.Square()
+	lucideSquareCheck  = lucide.SquareCheck()
+	lucidePin          = lucide.Pin()
+	lucideRotateCcw    = lucide.RotateCcw()
 )
 
 func (a *app) palette(cx *core.Scope) palette {
@@ -273,12 +280,14 @@ func (a *app) trackRow(p palette, tracks []music.Track, i int, showCover bool, s
 	if a.isTrackLiked(tr) {
 		heart = core.DisplayFlex
 	}
-	children = append(children, core.View{Style: core.Style{Width: core.Pt(32), Height: core.Pt(32), Direction: core.Row,
-		AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, Children: []core.Node{
-		core.View{Style: core.Style{Display: heart,
-			GroupStyle: &core.GroupStyle{Name: trackRowGroup, Hover: &core.Style{Display: core.DisplayFlex}}},
-			Children: []core.Node{a.likeButton(p, tr, 15, p.muted)}}}})
-	children = append(children, a.trackMVButton(p, func() music.Track { return tr }, "track-mv-"+tr.ID, false),
+	children = append(children, core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4, FlexShrink: 0}, Children: []core.Node{
+		core.View{TestID: "track-like-cell-" + tr.ID, Style: core.Style{Width: core.Pt(32), Height: core.Pt(32), Direction: core.Row,
+			AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, Children: []core.Node{
+			core.View{Style: core.Style{Display: heart,
+				GroupStyle: &core.GroupStyle{Name: trackRowGroup, Hover: &core.Style{Display: core.DisplayFlex}}},
+				Children: []core.Node{a.likeButton(p, tr, 15, p.muted)}}}},
+		a.trackMVButton(p, func() music.Track { return tr }, "track-mv-"+tr.ID, false),
+	}},
 		core.Text{Content: clock(tr.Length()), Style: core.Style{Width: core.Pt(44), TextAlign: core.TextAlignEnd, FontSize: 12.5, Color: p.faint}})
 	row.Children = children
 	return row

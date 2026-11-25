@@ -70,19 +70,37 @@ func TestSavedMusicBrowseSearchAndRetentionAcrossPlatforms(t *testing.T) {
 				ui.Press("id:nav-stored")
 			}
 			ui.Find("id:stored-page")
-			for _, id := range []string{"stored-source", "stored-quality", "stored-complete", "stored-select-all", "stored-select-none", "stored-pin", "stored-unpin", "stored-delete"} {
+			ui.Find("id:stored-filter-bar")
+			pageBounds := reviewBounds(ui.Find("id:stored-page"))
+			searchBounds := reviewBounds(ui.Find("id:stored-search-box"))
+			if platform == core.OSAndroid {
+				if searchBounds.Size.Height > 40 || searchBounds.Size.Width >= pageBounds.Size.Width-60 {
+					t.Fatalf("phone search box should stay compact and share its row: search=%+v page=%+v", searchBounds, pageBounds)
+				}
+			} else {
+				if searchBounds.Size.Height > 36 || searchBounds.Size.Width >= pageBounds.Size.Width*0.5 {
+					t.Fatalf("desktop search box should stay compact and not span the full width: search=%+v page=%+v", searchBounds, pageBounds)
+				}
+			}
+			for _, id := range []string{"stored-source", "stored-quality", "stored-complete", "stored-select-all", "stored-select-none", "stored-pin", "stored-unpin", "stored-delete", "stored-batch-bar"} {
 				if ui.Exists("id:" + id) {
 					t.Fatalf("unneeded initial control remains: %s", id)
 				}
 			}
+			firstID := offline.Key(tracks[0].Source, tracks[0].ID)
+			if ui.Exists("id:stored-select-" + firstID) {
+				t.Fatal("row checkbox should be hidden until multi-select mode is enabled")
+			}
 			ui.Type("id:stored-search", "Saved First")
 			ui.WaitUntil(time.Second, func() bool { return len(a.storedFilter(a.disk.List())) == 1 })
+			ui.Find("id:stored-filter-reset")
 			ui.Clear("id:stored-search")
 			ui.Type("id:stored-search", "Saved Second")
 			ui.WaitUntil(time.Second, func() bool {
 				return len(a.storedFilter(a.disk.List())) == 1 && a.storedFilter(a.disk.List())[0].Track.Source == "source-two"
 			})
-			ui.Clear("id:stored-search")
+			ui.Press("id:stored-filter-reset")
+			ui.WaitUntil(time.Second, func() bool { return len(a.storedFilter(a.disk.List())) == 2 && a.diskUI.query.GetUntracked() == "" })
 			if got := storedGroups(a.disk.List(), "albums"); len(got) != 2 {
 				t.Fatal("same album ID across plugins was merged")
 			}
@@ -209,7 +227,15 @@ func TestSavedMusicLongListScrollsAcrossPlatforms(t *testing.T) {
 			ui.ScrollTo("id:stored-scroll", core.Point{Y: scroll.Content.Height - scroll.Frame.Size.Height})
 			ui.Find(`label:"Saved 079"`)
 			lastID := offline.Key(tracks[79].Source, tracks[79].ID)
+			if ui.Exists("id:stored-select-" + lastID) {
+				t.Fatal("checkbox shown before entering multi-select mode")
+			}
 			before := ui.Find("id:stored-scroll").Offset.Y
+			ui.Press("id:stored-select-mode")
+			if after := ui.Find("id:stored-scroll").Offset.Y; after < before-1 {
+				t.Fatalf("entering multi-select mode reset scroll: %v -> %v", before, after)
+			}
+			before = ui.Find("id:stored-scroll").Offset.Y
 			ui.Press("id:stored-select-" + lastID)
 			if after := ui.Find("id:stored-scroll").Offset.Y; after < before-1 {
 				t.Fatalf("selecting a recycled row reset scroll: %v -> %v", before, after)
@@ -224,12 +250,69 @@ func TestSavedMusicLongListScrollsAcrossPlatforms(t *testing.T) {
 				t.Fatalf("batch action did not target only the selected saved song: %+v", queue)
 			}
 			ui.Type("id:stored-search", "Saved 000")
-			if ui.Find("id:stored-scroll").Offset.Y != 0 || len(a.selectedStored(a.disk.List())) != 0 {
-				t.Fatal("search did not reset scroll and selection")
+			if ui.Find("id:stored-scroll").Offset.Y != 0 || len(a.selectedStored(a.disk.List())) != 0 || a.diskUI.selecting {
+				t.Fatal("search did not reset scroll, selection, and multi-select mode")
 			}
-			if ui.Exists("id:stored-enqueue") {
+			if ui.Exists("id:stored-enqueue") || ui.Exists("id:stored-batch-bar") {
 				t.Fatal("batch actions remained visible without a selection")
 			}
 		})
 	}
+}
+
+func TestSavedMusicUnifiedRowsMenusAndGroups(t *testing.T) {
+	t.Run("desktop", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", dir)
+		tracks := seedStored(t, dir)
+		var a *app
+		ui := nsgotest.Start(t, func(cx *core.Scope) core.Node { a = newApp(cx); return a.view(cx) },
+			nsgotest.Size(1180, 780), nsgotest.Environment(core.Environment{OS: core.OSMacOS, Locale: "en"}))
+		ui.WaitUntil(time.Second, func() bool { return !a.homeBusy })
+		ui.Press("id:nav-stored")
+		ui.Find("id:stored-page")
+		firstID := offline.Key(tracks[0].Source, tracks[0].ID)
+		row := reviewBounds(ui.Find("id:stored-row-" + firstID))
+		if row.Size.Height != 54 {
+			t.Fatalf("desktop stored row height = %v, want 54 matching unified trackRow", row.Size.Height)
+		}
+		ui.RightClick("id:stored-row-" + firstID)
+		ui.Press(`text:"Copy Title"`)
+		if ui.Clipboard != "Saved First" {
+			t.Fatalf("desktop right-click menu copied %q, want Saved First", ui.Clipboard)
+		}
+		a.post(func() { a.diskUI.view = "albums"; a.diskUI.group = ""; a.bump() })
+		ui.Settle()
+		groups := storedGroups(a.disk.List(), "albums")
+		if len(groups) != 2 {
+			t.Fatalf("got %d album groups, want 2", len(groups))
+		}
+		ui.Press("id:stored-group-" + groups[0].key)
+		ui.Find("id:stored-group-back")
+		ui.Press("id:stored-group-back")
+		if a.diskUI.group != "" {
+			t.Fatal("group back did not return to album grid")
+		}
+	})
+
+	t.Run("phone", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", dir)
+		tracks := seedStored(t, dir)
+		var a *app
+		ui := nsgotest.Start(t, func(cx *core.Scope) core.Node { a = newApp(cx); return a.view(cx) },
+			nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{OS: core.OSAndroid, Locale: "zh-CN", SafeArea: core.Edges{Top: 24, Bottom: 24}}))
+		ui.WaitUntil(time.Second, func() bool { return !a.homeBusy })
+		ui.Press("id:phone-tab-library")
+		ui.Press("id:phone-stored")
+		ui.Find("id:stored-page")
+		firstID := offline.Key(tracks[0].Source, tracks[0].ID)
+		ui.Press("id:stored-more-" + firstID)
+		ui.Find("id:phone-sheet")
+		if infoItems := ui.QueryMounted(`text:"歌曲信息"`); len(infoItems) != 1 {
+			t.Fatalf("expected 1 Song Info action in phone sheet, got %d", len(infoItems))
+		}
+		ui.Press("id:phone-track-info")
+		ui.Find(`text:/MP3/`)
+	})
 }

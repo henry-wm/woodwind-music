@@ -99,6 +99,41 @@ export function mvStream({id}) {
 			if ui.Exists("label:Play MV for Without video") {
 				t.Fatal("MV button for a song with no MV")
 			}
+			mvBtnView := ui.Find("label:Play MV for With MV")
+			if len(mvBtnView.Children) == 0 {
+				t.Fatal("MV button should render a play icon")
+			}
+			mvIconSize := mvBtnView.Children[0].Bounds().Size
+			if mvIconSize.Height <= 0 || mvIconSize.Width*3 != mvIconSize.Height*4 {
+				t.Fatalf("MV icon should have 4:3 aspect ratio, got %vx%v", mvIconSize.Width, mvIconSize.Height)
+			}
+			var hasText func(*nsgotest.View) bool
+			hasText = func(n *nsgotest.View) bool {
+				if n.Text != "" {
+					return true
+				}
+				for _, ch := range n.Children {
+					if hasText(ch) {
+						return true
+					}
+				}
+				return false
+			}
+			if hasText(mvBtnView) {
+				t.Fatal("MV button should render an icon instead of MV text")
+			}
+			if !compact {
+				withMVLike := ui.Find("id:track-like-cell-has-mv").Bounds()
+				withoutMVLike := ui.Find("id:track-like-cell-no-mv").Bounds()
+				if withMVLike.Origin.X != withoutMVLike.Origin.X {
+					t.Fatalf("like cell misaligned between MV and non-MV rows: has-mv X=%v, no-mv X=%v", withMVLike.Origin.X, withoutMVLike.Origin.X)
+				}
+				mvButton := mvBtnView.Bounds()
+				mvPlaceholder := ui.Find("id:track-mv-no-mv-placeholder").Bounds()
+				if mvButton.Size.Width != mvPlaceholder.Size.Width || mvButton.Origin.X != mvPlaceholder.Origin.X {
+					t.Fatalf("MV placeholder mismatch: button=%+v placeholder=%+v", mvButton, mvPlaceholder)
+				}
+			}
 			ui.Press("label:Play MV for With MV")
 			ui.WaitUntil(2*time.Second, func() bool { return ui.Exists("id:mv-video") })
 			v := ui.FindMounted("id:mv-video")

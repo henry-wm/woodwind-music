@@ -632,11 +632,48 @@ func (a *app) heroNode(p palette, pic core.Node, kind, title string, sub core.No
 	}}
 }
 
+func (a *app) likedCover(p palette, tracks []music.Track) core.Node {
+	size := a.headingSize(212, 112)
+	const radius = core.Points(14)
+	if a.account != nil && a.account.ImageURL != "" {
+		return core.View{TestID: "liked-cover", Style: core.Style{Width: core.Pt(size), Height: core.Pt(size), CornerRadius: radius, Overflow: core.Hidden},
+			Children: []core.Node{a.cover(p, a.account.ImageURL, size, radius)}}
+	}
+	var covers []string
+	seen := map[string]bool{}
+	for _, tr := range tracks {
+		u := tr.Album.ImageURL
+		if u == "" || seen[u] {
+			continue
+		}
+		seen[u] = true
+		covers = append(covers, u)
+		if len(covers) == 4 {
+			break
+		}
+	}
+	if len(covers) == 4 {
+		tile := size / 2
+		row := func(urls []string) core.Node {
+			return core.View{Style: core.Style{Direction: core.Row, Width: core.Pt(size), Height: core.Pt(tile)},
+				Children: []core.Node{a.cover(p, urls[0], tile, 0), a.cover(p, urls[1], tile, 0)}}
+		}
+		return core.View{TestID: "liked-cover", Style: core.Style{Width: core.Pt(size), Height: core.Pt(size), CornerRadius: radius, Overflow: core.Hidden, Background: p.sidebar, Direction: core.Column},
+			Children: []core.Node{row(covers[:2]), row(covers[2:])}}
+	}
+	if len(covers) > 0 {
+		return core.View{TestID: "liked-cover", Style: core.Style{Width: core.Pt(size), Height: core.Pt(size), CornerRadius: radius, Overflow: core.Hidden},
+			Children: []core.Node{a.cover(p, covers[0], size, radius)}}
+	}
+	return core.View{TestID: "liked-cover", Style: core.Style{Width: core.Pt(size), Height: core.Pt(size), CornerRadius: radius, Background: p.sidebar,
+		BorderWidth: 0.5, BorderColor: p.hairline, Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
+		Children: []core.Node{icon(lucideNote, a.headingSize(56, 34), p.faint)}}
+}
+
 func (a *app) likedPage(cx *core.Scope, p palette) core.Node {
 	tracks := a.liked
+	pic := a.likedCover(p, tracks)
 	if len(tracks) == 0 {
-		pic := core.View{Style: core.Style{Width: core.Pt(a.headingSize(212, 112)), Height: core.Pt(a.headingSize(212, 112)), CornerRadius: 14, Background: p.accent,
-			Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, Children: []core.Node{icon(lucideHeart, a.headingSize(64, 38), p.onAccent)}}
 		return a.pageScroll(p,
 			a.hero(p, pic, i18n.T("Playlist"), i18n.T("Liked Songs"), i18n.Songs(0), nil),
 			core.View{Style: core.Style{Direction: core.Column, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(48, 0)}, Children: []core.Node{
@@ -645,8 +682,6 @@ func (a *app) likedPage(cx *core.Scope, p palette) core.Node {
 				text(i18n.T("Touch the heart of a song to keep it."), 13, core.FontWeightNormal, p.muted),
 			}})
 	}
-	pic := core.View{Style: core.Style{Width: core.Pt(a.headingSize(212, 112)), Height: core.Pt(a.headingSize(212, 112)), CornerRadius: 14, Background: p.accent,
-		Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, Children: []core.Node{icon(lucideHeart, a.headingSize(64, 38), p.onAccent)}}
 	return a.pageScroll(p,
 		a.hero(p, pic, i18n.T("Playlist"), i18n.T("Liked Songs"), i18n.Songs(len(tracks)), tracks),
 		a.trackList(p, tracks, true, false, a.currentID()),
