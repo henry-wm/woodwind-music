@@ -43,7 +43,7 @@ var (
 	lucideDisc         = lucide.Disc3()
 	lucideUser         = lucide.User()
 	lucidePlay         = lucide.Play()
-	lucideMV           = lucide.SquarePlay()
+	mvPlayIcon         = core.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 18"><rect x="1.25" y="1.25" width="21.5" height="15.5" rx="3.8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.3 5.9v6.2q0 .8.69.4l5.42-3.1q.69-.4 0-.8L9.99 5.5q-.69-.4-.69.4Z" fill="currentColor"/></svg>`))
 	lucidePause        = lucide.Pause()
 	lucidePrev         = lucide.SkipBack()
 	lucideNext         = lucide.SkipForward()
