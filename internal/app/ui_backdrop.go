@@ -17,6 +17,7 @@ const fogWGSLSource = `struct Uniforms {
 	deep: vec4f,
 	fog: vec4f,
 	blend: f32,
+	time: f32,
 }
 
 fn fog_hash(p: vec2f) -> f32 {
@@ -50,7 +51,7 @@ fn shade(uv: vec2f) -> vec4f {
 	let size = max(nsh.size, vec2f(1.0, 1.0));
 	let pos = uv * size;
 	let p = pos / size.y * 2.4;
-	let t = nsh.time + 2.4;
+	let t = uniforms.time + 2.4;
 	let rise = vec2f(0.0, t * 0.1);
 	let q = vec2f(
 		fog_fbm(p + rise + vec2f(0.0, t * 0.04)),
@@ -83,7 +84,11 @@ var fogShader = sync.OnceValue(func() *core.ShaderProgram {
 	return core.MustCompileWGSL(fogWGSLSource)
 })
 
-const fogFadeDuration = 700 * time.Millisecond
+const (
+	fogFadeDuration = 700 * time.Millisecond
+	fogClockSpan    = time.Hour
+	fogFrameRate    = 30
+)
 
 // fogColors returns the deep backdrop shade and the lighter fog color for a
 // cover tint, keeping readability behind white foreground text. Neutral covers
@@ -121,12 +126,57 @@ func (a *app) nowPlayingTint() core.Color {
 }
 
 // fogBackdrop fills Now Playing with the GPU fog shader. Its clock runs on the
-// platform frame clock while music plays and pauses on pause or Reduce Motion.
+// platform animation driver at 30 fps while music plays and pauses on pause or
+// Reduce Motion, leaving the full display rate for scrolls and transitions.
 func (a *app) fogBackdrop(cx *core.Scope) core.Node {
 	blend := core.NewAnimatedValue(cx, 1)
+	clock := core.NewAnimatedValue(cx, 0)
 	var initialized bool
 	var prevDeep, prevFog, curDeep, curFog core.Color
 	var fadeRun *core.AnimationRun
+
+	paused := core.NewMemo(cx, func() bool {
+		a.playRev.Get()
+		return !a.pl.Playing() || cx.Env().ReduceMotion()
+	})
+	var clockRun *core.AnimationRun
+	var elapsed float64
+	var since time.Time
+	running := false
+	cx.Effect(func() {
+		if paused.Get() {
+			if running {
+				if dt := cx.Now().Sub(since).Seconds(); dt > 0 {
+					elapsed += dt
+				}
+				running = false
+			}
+			if clockRun != nil {
+				clockRun.Stop()
+				clockRun = nil
+			}
+			clock.Set(elapsed)
+			return
+		}
+		if running {
+			return
+		}
+		running = true
+		since = cx.Now()
+		clock.Set(elapsed)
+		span := fogClockSpan.Seconds()
+		anim := core.AtFrameRate(
+			core.Loop(core.Timing(clock, elapsed+span, core.TimingConfig{
+				Duration: fogClockSpan,
+				Easing:   core.Easing{Bezier: core.Linear},
+			}), 0),
+			fogFrameRate,
+		)
+		// Keep the run on the backdrop's scope so effect re-runs never cancel it.
+		cx.Run(func() {
+			clockRun = cx.StartAnimation(anim, nil)
+		})
+	})
 
 	return core.Shader{
 		TestID:  "np-fog",
@@ -150,10 +200,15 @@ func (a *app) fogBackdrop(cx *core.Scope) core.Node {
 					blend.Set(1)
 				} else {
 					blend.Set(0)
-					fadeRun = cx.StartAnimation(core.Timing(blend, 1, core.TimingConfig{
-						Duration: fogFadeDuration,
-						Easing:   core.Easing{Bezier: core.EaseOut},
-					}), nil)
+					// Keep the crossfade on the backdrop's scope rather than this
+					// UniformsFunc render effect, so playRev/artRev updates do not
+					// cancel an in-flight fade.
+					cx.Run(func() {
+						fadeRun = cx.StartAnimation(core.Timing(blend, 1, core.TimingConfig{
+							Duration: fogFadeDuration,
+							Easing:   core.Easing{Bezier: core.EaseOut},
+						}), nil)
+					})
 				}
 			}
 			return core.Uniforms{
@@ -162,11 +217,8 @@ func (a *app) fogBackdrop(cx *core.Scope) core.Node {
 				"deep":     curDeep,
 				"fog":      curFog,
 				"blend":    blend,
+				"time":     clock,
 			}
-		},
-		PausedFunc: func() bool {
-			a.playRev.Get()
-			return !a.pl.Playing() || cx.Env().ReduceMotion()
 		},
 		Style: core.Style{
 			Position:      core.Absolute,

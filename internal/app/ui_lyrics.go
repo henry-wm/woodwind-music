@@ -44,22 +44,31 @@ func (a *app) lyricsPane(cx *core.Scope, white core.Color) core.Node {
 		return lyrics.Index(lines, a.pl.Position())
 	})
 	// Only this pane asks for word frames; the rest of the application retains
-	// its slower playback clock. Pausing or disposing the pane stops the loop.
+	// its slower playback clock. Keep the timer on the pane's scope rather than
+	// the effect's, so tick updates do not cancel the loop while running is true.
 	running := false
 	var beat func()
 	beat = func() {
+		if cx.Disposed() {
+			running = false
+			return
+		}
 		frame.Update(func(n int) int { return n + 1 })
 		if a.pl.Playing() {
-			cx.AfterFunc(40*time.Millisecond, beat)
+			cx.Run(func() { cx.AfterFunc(40*time.Millisecond, beat) })
 		} else {
 			running = false
 		}
 	}
-	cx.Effect(func() {
+	playing := core.NewMemo(cx, func() bool {
 		a.tick.Get()
-		if !running && a.pl.Playing() {
+		a.playRev.Get()
+		return a.pl.Playing()
+	})
+	cx.Effect(func() {
+		if playing.Get() && !running {
 			running = true
-			cx.AfterFunc(40*time.Millisecond, beat)
+			cx.Run(func() { cx.AfterFunc(40*time.Millisecond, beat) })
 		}
 	})
 	last := -2
@@ -73,6 +82,7 @@ func (a *app) lyricsPane(cx *core.Scope, white core.Color) core.Node {
 		}
 		last = -2
 		browsing.Set(false)
+		layout.Update(func(n int) int { return n + 1 })
 		frame.Update(func(n int) int { return n + 1 })
 	}
 	startBrowse := func(core.ScrollEvent) {

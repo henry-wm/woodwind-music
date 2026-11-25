@@ -51,9 +51,11 @@ func (a *app) ensureStageTicker() {
 			return
 		}
 		a.stageTick.Update(func(n int) int { return n + 1 })
-		a.cx.AfterFunc(33*time.Millisecond, beat)
+		a.cx.Run(func() { a.cx.AfterFunc(33*time.Millisecond, beat) })
 	}
-	a.cx.AfterFunc(33*time.Millisecond, beat)
+	// stageView runs inside a Dynamic scope that rebuilds on playRev updates.
+	// Keep the ticker on the app's scope so rebuilding does not strand stageTicking.
+	a.cx.Run(func() { a.cx.AfterFunc(33*time.Millisecond, beat) })
 }
 
 // stageView is the stage as the whole view: its tabs, the lyrics, and the
