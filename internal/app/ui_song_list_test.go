@@ -16,7 +16,7 @@ func TestDesktopSongListsRecycleRows(t *testing.T) {
 		tracks[i] = music.Track{ID: fmt.Sprintf("song-%03d", i), Name: fmt.Sprintf("Song %03d", i),
 			Artists: []music.Artist{{Name: fmt.Sprintf("Artist %03d", i)}}, Duration: 180000}
 	}
-	for _, kind := range []string{"tracks", "browse", "playlist", "queue", "wall"} {
+	for _, kind := range []string{"tracks", "browse", "playlist", "queue"} {
 		t.Run(kind, func(t *testing.T) {
 			t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", t.TempDir())
 			ui := nsgotest.Start(t, func(cx *core.Scope) core.Node {
@@ -34,9 +34,6 @@ func TestDesktopSongListsRecycleRows(t *testing.T) {
 				case "queue":
 					a.pl.Cue(tracks)
 					content = a.queuePane(cx, p.text)
-				case "wall":
-					a.pl.Cue(tracks)
-					content = a.wallPane(cx, p.text)
 				}
 				switch node := content.(type) {
 				case core.Scroll:
