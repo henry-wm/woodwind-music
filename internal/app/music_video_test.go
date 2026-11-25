@@ -103,6 +103,10 @@ export function mvStream({id}) {
 			if len(mvBtnView.Children) == 0 {
 				t.Fatal("MV button should render a play icon")
 			}
+			mvIconSize := mvBtnView.Children[0].Bounds().Size
+			if mvIconSize.Height <= 0 || mvIconSize.Width*3 != mvIconSize.Height*4 {
+				t.Fatalf("MV icon should have 4:3 aspect ratio, got %vx%v", mvIconSize.Width, mvIconSize.Height)
+			}
 			var hasText func(*nsgotest.View) bool
 			hasText = func(n *nsgotest.View) bool {
 				if n.Text != "" {

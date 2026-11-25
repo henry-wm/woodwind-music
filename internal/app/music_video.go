@@ -107,12 +107,12 @@ func (a *app) trackMVButton(p palette, track func() music.Track, testID string, 
 	return core.Dynamic(func(*core.Scope) core.Node {
 		t := track()
 		width, height := core.Pt(32), core.Pt(32)
-		iconSize := core.Points(15)
+		iconW, iconH := core.Points(16), core.Points(12)
 		radius := core.Points(8)
 		hoverBg := p.sidebar
 		if compact {
 			width, height = core.Pt(48), core.Pt(48)
-			iconSize = 20
+			iconW, iconH = 20, 15
 			radius = 24
 			hoverBg = p.hover
 		}
@@ -136,7 +136,7 @@ func (a *app) trackMVButton(p palette, track func() music.Track, testID string, 
 			Style: core.Style{Width: width, Height: height, FlexShrink: 0, CornerRadius: radius,
 				AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
 				Hover: &core.Style{Background: hoverBg}, Active: &core.Style{Background: p.press}},
-			Children: []core.Node{icon(lucideMV, iconSize, p.muted)}}
+			Children: []core.Node{core.Icon{SVG: mvPlayIcon, Style: core.Style{Width: core.Pt(iconW), Height: core.Pt(iconH), Color: p.muted}}}}
 	})
 }
 
