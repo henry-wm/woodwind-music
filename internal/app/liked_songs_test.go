@@ -190,3 +190,109 @@ func TestLikedCollectionPublishesAllSongsOnDesktopAndPhone(t *testing.T) {
 		})
 	}
 }
+
+func collectImageURIs(v *nsgotest.View) []string {
+	var uris []string
+	var walk func(*nsgotest.View)
+	walk = func(n *nsgotest.View) {
+		if n == nil {
+			return
+		}
+		if n.Image.Source.URI != "" {
+			uris = append(uris, n.Image.Source.URI)
+		}
+		for _, ch := range n.Children {
+			walk(ch)
+		}
+	}
+	walk(v)
+	return uris
+}
+
+func TestLikedCoverPrefersAccountAvatarAndFallbacks(t *testing.T) {
+	for _, width := range []core.Points{1180, 390} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", t.TempDir())
+			var a *app
+			var pal palette
+			ui := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+				a = newApp(cx)
+				return core.Dynamic(func(cx *core.Scope) core.Node {
+					a.rev.Get()
+					pal = a.palette(cx)
+					return a.likedPage(cx, pal)
+				})
+			}, nsgotest.Size(width, 780))
+			ui.WaitUntil(time.Second, func() bool { return !a.homeBusy })
+
+			// 1. Account avatar takes priority over track covers.
+			a.post(func() {
+				a.account = &music.Account{Name: "Tester", ImageURL: "https://example.com/avatar.jpg"}
+				a.liked = []music.Track{
+					{ID: "1", Name: "Song 1", Album: music.Album{ImageURL: "https://example.com/a1.jpg"}},
+				}
+				a.bump()
+			})
+			ui.Settle()
+			cover := ui.Find("id:liked-cover")
+			if got := collectImageURIs(cover); !slices.Equal(got, []string{"https://example.com/avatar.jpg"}) {
+				t.Fatalf("avatar cover images = %v", got)
+			}
+			if cover.Style.Background == pal.accent {
+				t.Fatal("liked cover should not use glaring accent background")
+			}
+
+			// 2. Without an account avatar, 4 distinct track covers render a 2x2 mosaic.
+			a.post(func() {
+				a.account = nil
+				a.liked = []music.Track{
+					{ID: "1", Name: "Song 1", Album: music.Album{ImageURL: "https://example.com/a1.jpg"}},
+					{ID: "2", Name: "Song 2", Album: music.Album{ImageURL: "https://example.com/a1.jpg"}},
+					{ID: "3", Name: "Song 3", Album: music.Album{ImageURL: "https://example.com/a2.jpg"}},
+					{ID: "4", Name: "Song 4", Album: music.Album{ImageURL: "https://example.com/a3.jpg"}},
+					{ID: "5", Name: "Song 5", Album: music.Album{ImageURL: "https://example.com/a4.jpg"}},
+				}
+				a.bump()
+			})
+			ui.Settle()
+			cover = ui.Find("id:liked-cover")
+			wantMosaic := []string{
+				"https://example.com/a1.jpg",
+				"https://example.com/a2.jpg",
+				"https://example.com/a3.jpg",
+				"https://example.com/a4.jpg",
+			}
+			if got := collectImageURIs(cover); !slices.Equal(got, wantMosaic) {
+				t.Fatalf("mosaic cover images = %v, want %v", got, wantMosaic)
+			}
+
+			// 3. Fewer than 4 distinct track covers uses the first available track cover.
+			a.post(func() {
+				a.liked = []music.Track{
+					{ID: "1", Name: "Song 1"},
+					{ID: "2", Name: "Song 2", Album: music.Album{ImageURL: "https://example.com/only.jpg"}},
+				}
+				a.bump()
+			})
+			ui.Settle()
+			cover = ui.Find("id:liked-cover")
+			if got := collectImageURIs(cover); !slices.Equal(got, []string{"https://example.com/only.jpg"}) {
+				t.Fatalf("single cover images = %v", got)
+			}
+
+			// 4. With neither avatar nor track cover, uses subtle sidebar placeholder instead of accent red.
+			a.post(func() {
+				a.liked = nil
+				a.bump()
+			})
+			ui.Settle()
+			cover = ui.Find("id:liked-cover")
+			if got := collectImageURIs(cover); len(got) != 0 {
+				t.Fatalf("fallback cover unexpectedly had images: %v", got)
+			}
+			if cover.Style.Background != pal.sidebar || cover.Style.Background == pal.accent {
+				t.Fatalf("fallback cover background = %v, want sidebar %v (not accent %v)", cover.Style.Background, pal.sidebar, pal.accent)
+			}
+		})
+	}
+}

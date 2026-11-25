@@ -106,25 +106,37 @@ func (a *app) fetchTrackMVs(sourceID string, lookup *mvLookup) {
 func (a *app) trackMVButton(p palette, track func() music.Track, testID string, compact bool) core.Node {
 	return core.Dynamic(func(*core.Scope) core.Node {
 		t := track()
+		width, height := core.Pt(32), core.Pt(32)
+		iconSize := core.Points(15)
+		radius := core.Points(8)
+		hoverBg := p.sidebar
+		if compact {
+			width, height = core.Pt(48), core.Pt(48)
+			iconSize = 20
+			radius = 24
+			hoverBg = p.hover
+		}
+		placeholder := func() core.Node {
+			if compact {
+				return nil
+			}
+			return core.View{TestID: testID + "-placeholder", Style: core.Style{Width: width, Height: height, FlexShrink: 0}}
+		}
 		src := a.mvSource(t)
 		if src == nil {
-			return nil
+			return placeholder()
 		}
 		a.mvRev.Get()
 		id := a.trackMV(src, t.ID)
 		if id == "" {
-			return nil
-		}
-		width, height := core.Pt(36), core.Pt(30)
-		if compact {
-			width, height = core.Pt(48), core.Pt(48)
+			return placeholder()
 		}
 		return base.Button{TestID: testID, Label: i18n.Tf("Play MV for %s", t.Name),
 			OnPress: func(core.PressEvent) { a.openMV(t, src, id) },
-			Style: core.Style{Width: width, Height: height, FlexShrink: 0, CornerRadius: 8,
+			Style: core.Style{Width: width, Height: height, FlexShrink: 0, CornerRadius: radius,
 				AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
-				Hover: &core.Style{Background: p.hover}, Active: &core.Style{Background: p.press}},
-			Children: []core.Node{text("MV", 11, core.FontWeightMedium, p.accent)}}
+				Hover: &core.Style{Background: hoverBg}, Active: &core.Style{Background: p.press}},
+			Children: []core.Node{icon(lucideMV, iconSize, p.muted)}}
 	})
 }
 
