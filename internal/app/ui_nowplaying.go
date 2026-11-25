@@ -20,15 +20,21 @@ func (a *app) nowPlayingView(cx *core.Scope, p palette) core.Node {
 		a.playRev.Get()
 		return a.nowPlayingBody(cx, p, white)
 	})
-	backdrop := core.Dynamic(func(cx *core.Scope) core.Node {
-		a.playRev.Get()
-		if t := a.pl.Current(); t != nil && t.Album.ImageURL != "" {
-			return a.sourceImage(core.Image{Source: imageSource(t.Album.ImageURL), ResizeMode: core.Cover, BlurRadius: 90,
-				Style: core.Style{Position: core.Absolute, Top: core.Pt(-60), Right: core.Pt(-60), Bottom: core.Pt(-60), Left: core.Pt(-60),
-					Opacity: core.Alpha(0.16)}})
-		}
-		return core.Group{}
-	})
+	backdrop := core.Show{
+		When: func() bool { a.rev.Get(); return a.set.Fog },
+		Then: func(cx *core.Scope) core.Node { return a.fogBackdrop(cx) },
+		Else: func(cx *core.Scope) core.Node {
+			return core.Dynamic(func(cx *core.Scope) core.Node {
+				a.playRev.Get()
+				if t := a.pl.Current(); t != nil && t.Album.ImageURL != "" {
+					return a.sourceImage(core.Image{Source: imageSource(t.Album.ImageURL), ResizeMode: core.Cover, BlurRadius: 90,
+						Style: core.Style{Position: core.Absolute, Top: core.Pt(-60), Right: core.Pt(-60), Bottom: core.Pt(-60), Left: core.Pt(-60),
+							Opacity: core.Alpha(0.16)}})
+				}
+				return core.Group{}
+			})
+		},
+	}
 	topbar := core.View{Style: core.Style{Height: core.Pt(40), FlexShrink: 0, Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
 		Desktop: core.DesktopViewProps{WindowDrag: core.WindowDragOn}, Children: []core.Node{
 			base.Button{Label: i18n.T("Close"), TestID: "np-close", OnPress: func(core.PressEvent) { a.closeNowPlaying() },
@@ -44,13 +50,7 @@ func (a *app) nowPlayingView(cx *core.Scope, p palette) core.Node {
 		StyleFunc: func() core.Style {
 			a.playRev.Get()
 			a.artRev.Get()
-			tint := core.RGB(0x787882)
-			if t := a.pl.Current(); t != nil {
-				if c := a.coverTint(t.Album.ImageURL); c != 0 {
-					tint = c
-				}
-			}
-			top, foot := nowPlayingColors(tint)
+			top, foot := nowPlayingColors(a.nowPlayingTint())
 			return core.Style{Gradients: []core.Gradient{core.LinearGradient(180, top, foot)}}
 		}, Children: children}
 }
@@ -63,8 +63,15 @@ func (a *app) nowPlayingBody(cx *core.Scope, p palette, white core.Color) core.N
 		return core.View{Style: core.Style{FlexGrow: 1, FlexBasis: core.Pt(0), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
 			Children: []core.Node{text(i18n.T("Not Playing"), 22, core.FontWeightBold, core.RGBA(0xffffff, 0.5))}}
 	}
-	if a.npPane.GetUntracked() == 3 {
+	paneIdx := a.npPane.Get()
+	if paneIdx != 2 {
+		a.wall.track = ""
+	}
+	if paneIdx == 3 {
 		return a.stageView(cx, p, white)
+	}
+	if paneIdx == 2 {
+		return a.wallView(cx, p, white)
 	}
 	size := cx.Env().Window()
 	pad := max(core.Points(72), (size.Width-1280)/2)
@@ -133,9 +140,6 @@ func (a *app) nowPlayingBody(cx *core.Scope, p palette, white core.Color) core.N
 			case 1:
 				a.modeRev.Get()
 				return a.queuePane(cx, white)
-			case 2:
-				a.modeRev.Get()
-				return a.wallPane(cx, white)
 			default:
 				return a.lyricsPane(cx, white)
 			}
@@ -236,82 +240,4 @@ func (a *app) queuePane(cx *core.Scope, white core.Color) core.Node {
 				return ui.ContextMenu{Trigger: item, Children: a.trackMenu(tr, "", -1)}
 			})
 		}}
-}
-
-// wallPane is the queue's covers, a wall of what could play next: a press
-// plays one.
-func (a *app) wallPane(cx *core.Scope, white core.Color) core.Node {
-	queue := a.pl.Queue()
-	order, at := a.pl.PlayOrder()
-	// The queue in the order it plays.
-	rows := make([]music.Track, 0, len(order))
-	for _, i := range order {
-		if i >= 0 && i < len(queue) {
-			rows = append(rows, queue[i])
-		}
-	}
-	list := &core.Ref{}
-	last := -2
-	cx.Effect(func() {
-		a.playRev.Get()
-		_, now := a.pl.PlayOrder()
-		if now != last {
-			last = now
-			if now >= 0 {
-				list.ScrollToIndex(now, true)
-			}
-		}
-	})
-	cols := max(2, min(6, int((cx.Env().Window().Width-sidebarWidth)/210)))
-	return core.List{Ref: list, Count: func() int { return len(rows) }, Key: func(i int) any { return rows[i].ID },
-		NumColumns: cols, EstimatedSize: 190, ColumnGap: 14, Gap: 14,
-		Style: core.Style{FlexGrow: 1, MinHeight: core.Pt(0)},
-		Row: func(cx *core.Scope, row core.ListRow) core.Node {
-			return core.Dynamic(func(cx *core.Scope) core.Node {
-				i := row.Index()
-				tr := rows[i]
-				current := func() bool {
-					a.playRev.Get()
-					o, now := a.pl.PlayOrder()
-					return now >= 0 && now < len(o) && o[now] == queueIndex(queue, tr.ID)
-				}
-				_ = at
-				item := base.Button{Label: tr.Name, TestID: "wall-" + tr.ID, OnPress: func(core.PressEvent) {
-					for qi, q := range queue {
-						if q.ID == tr.ID {
-							a.pl.Jump(qi)
-							return
-						}
-					}
-				}, StyleFunc: func() core.Style {
-					s := core.Style{Direction: core.Column, Gap: 6, Padding: core.All(6), CornerRadius: 12,
-						Hover: &core.Style{Background: core.RGBA(0xffffff, 0.07)}}
-					if current() {
-						s.Background = core.RGBA(0xffffff, 0.12)
-						s.BorderWidth, s.BorderColor = 1.5, core.RGBA(0xffffff, 0.9)
-					}
-					if tr.Unavailable {
-						s.Opacity = core.Alpha(0.4)
-					}
-					return s
-				}, Children: []core.Node{
-					func() core.Node {
-						pic := a.cover(palette{faint: core.RGBA(0xffffff, 0.3), hover: core.RGBA(0xffffff, 0.08)}, tr.Album.ImageURL, 168, 10)
-						return core.View{Style: core.Style{Width: core.Pct(100), AspectRatio: 1}, Children: []core.Node{pic}}
-					}(),
-					core.Text{Content: tr.Name, MaxLines: 1, Style: core.Style{FontSize: 12.5, FontWeight: core.FontWeightMedium, Color: white}},
-					core.Text{Content: tr.ArtistNames(), MaxLines: 1, Style: core.Style{FontSize: 11.5, Color: core.RGBA(0xffffff, 0.5)}},
-				}}
-				return ui.ContextMenu{Trigger: item, Children: a.trackMenu(tr, "", -1)}
-			})
-		}}
-}
-
-func queueIndex(queue []music.Track, id string) int {
-	for i, t := range queue {
-		if t.ID == id {
-			return i
-		}
-	}
-	return -1
 }

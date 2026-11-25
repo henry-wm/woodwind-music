@@ -105,11 +105,7 @@ type settings struct {
 	SearchHistory []string `json:"searchHistory,omitempty"`
 	// LyricsStage shows lyrics on the stage rather than scrolling.
 	LyricsStage bool `json:"lyricsStage"`
-	// GrowFromCover opens Now Playing out of the player bar's cover.
-	GrowFromCover bool `json:"growFromCover"`
-	// Smoke makes the progress bar a comet as music plays.
-	Smoke bool `json:"smoke"`
-	// Fog fills Now Playing's backdrop with fog of the cover's colors.
+	// Fog fills Now Playing's backdrop with drifting fog of the cover's colors.
 	Fog bool `json:"fog"`
 	// AppIcon is where the app's icon shows on macOS (appIcons).
 	AppIcon string `json:"appIcon"`
@@ -302,6 +298,8 @@ type app struct {
 	reloadGen         int
 	mutedFrom         float64
 	nowPlaying        bool
+	npTint            core.Color
+	wall              wallState
 	queueAt           int
 	scroll            map[string]core.Points
 	phoneTab          int
@@ -924,6 +922,7 @@ func (a *app) goForward() {
 func (a *app) closeNowPlaying() {
 	if a.nowPlaying {
 		a.nowPlaying = false
+		a.wall.track = ""
 		a.np.Set(false)
 		a.phoneLyrics.Set(false)
 	}

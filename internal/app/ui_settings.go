@@ -326,12 +326,8 @@ func (a *app) settingsCategories(p palette) []settingsCatDef {
 
 	experiments := settingsCatDef{id: "experiments", label: i18n.T("Experiments"), icon: lucide.FlaskConical(),
 		groups: []settingsGroupDef{{rows: []settingsRowDef{
-			{label: i18n.T("Smoke on the Progress Bar"), sub: i18n.T("The progress bar turns into a light trailing smoke, moving with the music. Uses a little more power."),
-				control: a.smokeControl},
-			{label: i18n.T("Fog Backdrop"), sub: i18n.T("Now Playing's backdrop turns into fog in the cover's colors, rising with the bass. Still being polished; uses a little more power."),
+			{label: i18n.T("Fog Backdrop"), sub: i18n.T("Now Playing's backdrop turns into drifting fog in the cover's colors. Uses a little more power."),
 				control: a.fogControl},
-			{label: i18n.T("Grow From the Cover"), sub: i18n.T("Now Playing opens out of the cover in the player bar and shrinks back into it, rather than sliding up from the bottom"),
-				control: a.growFromCoverControl},
 		}}}}
 
 	cats := []settingsCatDef{general, playback, library, a.pluginCategories(), cache}
@@ -598,28 +594,12 @@ func (a *app) normalizeControl(p palette) core.Node {
 	}, TestID: "settings-normalize", Label: i18n.T("Even Out Loudness")}
 }
 
-func (a *app) smokeControl(p palette) core.Node {
-	return settingsSwitch{palette: p, Touch: a.settingsInMain && a.phoneLayout(a.cx), Checked: func() bool { return a.set.Smoke }, OnChange: func(on bool) {
-		a.set.Smoke = on
-		a.set.save()
-		a.bump()
-	}, Label: i18n.T("Smoke on the Progress Bar")}
-}
-
 func (a *app) fogControl(p palette) core.Node {
 	return settingsSwitch{palette: p, Touch: a.settingsInMain && a.phoneLayout(a.cx), Checked: func() bool { return a.set.Fog }, OnChange: func(on bool) {
 		a.set.Fog = on
 		a.set.save()
 		a.bump()
-	}, Label: i18n.T("Fog Backdrop")}
-}
-
-func (a *app) growFromCoverControl(p palette) core.Node {
-	return settingsSwitch{palette: p, Touch: a.settingsInMain && a.phoneLayout(a.cx), Checked: func() bool { return a.set.GrowFromCover }, OnChange: func(on bool) {
-		a.set.GrowFromCover = on
-		a.set.save()
-		a.bump()
-	}, Label: i18n.T("Grow From the Cover")}
+	}, TestID: "settings-fog", Label: i18n.T("Fog Backdrop")}
 }
 
 // localFilesControl rescans the folders, or adds another.
