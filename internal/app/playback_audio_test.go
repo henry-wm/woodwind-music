@@ -1,6 +1,8 @@
 package app
 
 import (
+	"net/url"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -83,6 +85,96 @@ func TestDesktopNSGoAudioTransport(t *testing.T) {
 			ui.Settle()
 			if !native.Closed {
 				t.Fatal("closing a track did not release its NSGo player")
+			}
+		})
+	}
+}
+
+func TestDesktopPlayPauseButtonFadesAndPausesNSGoAudio(t *testing.T) {
+	t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", t.TempDir())
+	musicDir := t.TempDir()
+	trackPath := filepath.Join(musicDir, "Haruhikage.wav")
+	writeToneWAV(t, trackPath)
+
+	for _, platform := range []core.OS{core.OSMacOS, core.OSWindows} {
+		t.Run(string(platform), func(t *testing.T) {
+			var a *app
+			ui := nsgotest.StartApp(t, func(cx *core.Scope) {
+				desktop.SetShutdownMode(cx, desktop.ShutdownOnExplicit)
+				a = newApp(cx)
+				a.pl.Native = newAudioOutput(cx)
+				a.pl.SetVolume(1)
+				a.tray = &testWindowsTray{registered: true}
+				cx.SetMainView(a.view)
+			}, nsgotest.Environment(core.Environment{OS: platform, Audio: true}), nsgotest.Size(1180, 780))
+			trackURI := (&url.URL{Scheme: "file", Path: filepath.ToSlash(trackPath)}).String()
+			ui.AudioDurations = map[string]time.Duration{trackURI: time.Minute, trackPath: time.Minute}
+
+			ui.Post(func() { a.local.AddFolders(musicDir) })
+			ui.WaitUntil(5*time.Second, func() bool {
+				return a.local.TrackCount() == 1 && !a.local.Scanning() && !a.homeBusy && a.home != nil && len(a.home.Sections) > 0
+			})
+
+			ui.Press("id:daily")
+			ui.WaitUntil(2*time.Second, func() bool { return ui.Exists("text:Haruhikage") })
+			ui.Press("text:Haruhikage >> nth=0")
+			ui.WaitUntil(5*time.Second, func() bool {
+				return len(ui.Players) == 1 && ui.Players[0].Playing && a.pl.Playing()
+			})
+			native := ui.Players[0]
+
+			// Pressing the player bar play/pause button rebuilds that button via playRev.
+			// Its pause fade timer must stay alive on the track scope and pause the audio player.
+			ui.Press("id:play-pause")
+			ui.Settle()
+			if a.pl.Playing() {
+				t.Fatal("player state stayed playing after pressing play-pause")
+			}
+			ui.Advance(250 * time.Millisecond)
+			if native.Playing || native.Volume != 0 {
+				t.Fatalf("player bar pause left native audio active: %+v", native)
+			}
+
+			// Pressing play/pause again must resume and complete its fade-in to full volume.
+			ui.Press("id:play-pause")
+			ui.Settle()
+			if !a.pl.Playing() || !native.Playing {
+				t.Fatalf("player bar resume did not restart audio: playing=%v native=%+v", a.pl.Playing(), native)
+			}
+			ui.Advance(300 * time.Millisecond)
+			if native.Volume != 1 {
+				t.Fatalf("player bar resume fade stayed at volume %v, want 1", native.Volume)
+			}
+
+			// The Now Playing overlay play/pause button rebuilds with playRev as well.
+			ui.Press("id:bar-open")
+			ui.Settle()
+			ui.Press("id:np-controls >> id:play-pause")
+			ui.Settle()
+			ui.Advance(250 * time.Millisecond)
+			if native.Playing || native.Volume != 0 {
+				t.Fatalf("now playing pause left native audio active: %+v", native)
+			}
+
+			ui.Press("id:np-controls >> id:play-pause")
+			ui.Settle()
+			ui.Advance(300 * time.Millisecond)
+			if !native.Playing || native.Volume != 1 {
+				t.Fatalf("now playing resume left native audio in wrong state: %+v", native)
+			}
+
+			// Resuming mid-fade cancels the pending pause and restores full volume.
+			ui.Press("id:np-controls >> id:play-pause")
+			ui.Settle()
+			ui.Advance(80 * time.Millisecond)
+			if !native.Playing || native.Volume <= 0 || native.Volume >= 1 {
+				t.Fatalf("pause did not fade midway: %+v", native)
+			}
+			ui.Press("id:np-controls >> id:play-pause")
+			ui.Settle()
+			ui.Advance(300 * time.Millisecond)
+			if !native.Playing || native.Volume != 1 {
+				t.Fatalf("mid-fade resume did not restore playback: %+v", native)
 			}
 		})
 	}
