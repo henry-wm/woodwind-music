@@ -1066,7 +1066,7 @@ func (a *app) pluginDialogs(cx *core.Scope, settings bool) core.Node {
 				name = src.Info().Name
 			}
 			dialog.Title = i18n.Tf("Remove %s?", name)
-			dialog.Description = i18n.T("Plugin settings and saved music are kept. Manage local copies in Saved Music.")
+			dialog.Description = i18n.T("Plugin settings and downloaded music are kept. Manage local copies in Downloaded Music.")
 			dialog.Footer = []core.Node{ui.Button{Text: i18n.T("Cancel"), OnPress: a.cancelPluginDialog}, ui.Button{Text: i18n.T("Remove"), TestID: "plugin-remove-confirm", OnPress: func() { a.removePlugin(id) }}}
 		} else if pending := in.pending; pending != nil {
 			dialog.Title = i18n.Tf("Install %s?", strings.TrimSpace(pending.Manifest.Name+" "+pending.Version))

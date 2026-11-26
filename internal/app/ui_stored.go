@@ -65,7 +65,7 @@ func (a *app) pinTracks(tracks []music.Track, q string) {
 			}
 		}
 		if len(failures) == 0 {
-			a.post(func() { a.say(i18n.T("Offline requests added. View progress in Saved Music.")) })
+			a.post(func() { a.say(i18n.T("Offline requests added. View progress in Downloaded Music.")) })
 		}
 		return errors.Join(failures...)
 	})
@@ -174,7 +174,7 @@ func (a *app) storedActiveTaskCount() int {
 
 func (a *app) storedPage(cx *core.Scope, p palette) core.Node {
 	if a.disk == nil {
-		return a.emptyNote(p, i18n.T("Saved Music"), a.diskErr)
+		return a.emptyNote(p, i18n.T("Downloaded Music"), a.diskErr)
 	}
 	if a.diskUI.query == nil {
 		a.diskUI.query = core.NewSignal(a.cx, "")
@@ -212,19 +212,40 @@ func (s storedScreen) renderDesktop(cx *core.Scope, searchRef *core.Ref) core.No
 				a.diskUI.query.Get()
 				return a.storedDesktopHeader(p)
 			}),
-			core.View{TestID: "stored-filter-bar", StyleFunc: func() core.Style {
-				a.rev.Get()
-				st := core.Style{Direction: core.Row, Wrap: core.Wrap, AlignItems: core.AlignCenter, Gap: 8}
-				if a.diskUI.tasks {
-					st.Display = core.DisplayNone
-				}
-				return st
-			}, Children: []core.Node{
-				a.storedSearchField(p, searchRef, false),
+			core.View{TestID: "stored-filter-bar", Style: core.Style{Direction: core.Row,
+				AlignItems: core.AlignStart, JustifyContent: core.JustifySpaceBetween, Gap: 8}, Children: []core.Node{
+				core.View{StyleFunc: func() core.Style {
+					a.rev.Get()
+					st := core.Style{Direction: core.Row, Wrap: core.Wrap, AlignItems: core.AlignCenter, Gap: 6,
+						FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)}
+					if a.diskUI.tasks {
+						st.Display = core.DisplayNone
+					}
+					return st
+				}, Children: []core.Node{
+					a.storedSearchField(p, searchRef, false),
+					core.Dynamic(func(cx *core.Scope) core.Node {
+						a.rev.Get()
+						a.diskUI.query.Get()
+						return a.storedDesktopConditions(p)
+					}),
+				}},
 				core.Dynamic(func(cx *core.Scope) core.Node {
 					a.rev.Get()
+					if !a.diskUI.tasks {
+						return core.Group{}
+					}
+					return a.storedBarButton(p, "stored-tasks-back", lucideChevronLeft, i18n.T("Back"), false, false, func() {
+						a.diskUI.tasks = false
+						a.diskUI.resetBrowse()
+						a.bump()
+					})
+				}),
+				core.Dynamic(func(cx *core.Scope) core.Node {
+					a.rev.Get()
+					a.diskRev.Get()
 					a.diskUI.query.Get()
-					return a.storedDesktopConditions(p)
+					return a.storedDesktopActions(p)
 				}),
 			}},
 			core.Dynamic(func(cx *core.Scope) core.Node {
@@ -298,7 +319,8 @@ func (a *app) storedSearchField(p palette, ref *core.Ref, phone bool) core.Node 
 	bg := p.hover
 	iconSize := core.Points(13.5)
 	boxStyle := core.Style{
-		Width: core.Pt(220), Height: core.Pt(height), FlexShrink: 0,
+		FlexGrow: 1, FlexShrink: 1, FlexBasis: core.Pt(120), MinWidth: core.Pt(120), MaxWidth: core.Pt(200),
+		Height: core.Pt(height),
 		Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6,
 		Padding: core.Symmetric(0, 8), CornerRadius: radius, Background: bg,
 		BorderWidth: 1, BorderColor: p.hairline,
@@ -322,7 +344,7 @@ func (a *app) storedSearchField(p palette, ref *core.Ref, phone bool) core.Node 
 		icon(lucideSearch, iconSize, p.muted),
 		core.Input{
 			Ref: ref, TestID: "stored-search",
-			Label: i18n.T("Search saved music"), Placeholder: i18n.T("Search saved music"),
+			Label: i18n.T("Search downloaded music"), Placeholder: i18n.T("Search downloaded music"),
 			Value: a.diskUI.query.Get, NoAutoCorrect: true,
 			OnChange: func(v string) { a.diskUI.resetBrowse(); a.diskUI.query.Set(v) },
 			Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Height: core.Pt(inputHeight),
@@ -347,8 +369,6 @@ func (a *app) storedDesktopHeader(p palette) core.Node {
 	for _, r := range records {
 		size += r.Size()
 	}
-	tracks := a.storedTracks(records)
-	showingSongs := !u.tasks && (u.view == "" || u.group != "")
 
 	var heading []core.Node
 	if !u.tasks && u.view != "" && u.group != "" {
@@ -358,7 +378,7 @@ func (a *app) storedDesktopHeader(p palette) core.Node {
 				Padding: core.Symmetric(3, 8), Margin: core.Edges{Left: -8, Bottom: 2}, CornerRadius: 6,
 				Hover: &core.Style{Background: p.hover}},
 			Children: []core.Node{icon(lucideChevronLeft, 14, p.muted), text(i18n.T("Back"), 12.5, core.FontWeightMedium, p.muted)}})
-		groupTitle := i18n.T("Saved Music")
+		groupTitle := i18n.T("Downloaded Music")
 		if chosen != nil {
 			groupTitle = chosen.name
 		}
@@ -369,7 +389,7 @@ func (a *app) storedDesktopHeader(p palette) core.Node {
 				Style: core.Style{FontSize: 28, FontWeight: core.FontWeightBold, LetterSpacing: -0.6, Color: p.text}})
 	} else if u.tasks {
 		heading = append(heading,
-			core.Text{Content: i18n.T("Saved Music"),
+			core.Text{Content: i18n.T("Downloaded Music"),
 				Style: core.Style{FontSize: 12, FontWeight: core.FontWeightSemibold, LetterSpacing: 0.4, Color: p.muted}},
 			core.Text{Content: i18n.T("Download Tasks"),
 				Style: core.Style{FontSize: 30, FontWeight: core.FontWeightBold, LetterSpacing: -0.6, Color: p.text}})
@@ -377,21 +397,26 @@ func (a *app) storedDesktopHeader(p palette) core.Node {
 		heading = append(heading,
 			core.Text{Content: i18n.Tf("%d songs available on this device", len(records)) + " · " + bytesLabel(size),
 				Style: core.Style{FontSize: 12, FontWeight: core.FontWeightSemibold, LetterSpacing: 0.4, Color: p.muted}},
-			core.Text{Content: i18n.T("Saved Music"),
+			core.Text{Content: i18n.T("Downloaded Music"),
 				Style: core.Style{FontSize: 30, FontWeight: core.FontWeightBold, LetterSpacing: -0.6, Color: p.text}})
 	}
 
+	return core.View{Style: core.Style{Direction: core.Column, Gap: 4}, Children: heading}
+}
+
+func (a *app) storedDesktopActions(p palette) core.Node {
+	u := &a.diskUI
+	all := a.disk.List()
+	records, _ := a.storedVisible(all)
+	showingSongs := !u.tasks && (u.view == "" || u.group != "")
+
 	var actions []core.Node
 	if showingSongs {
-		actions = append(actions,
-			a.storedPillButton(p, "stored-play-all", lucidePlay, i18n.T("Play"), true, false, len(records) == 0, func() { a.playTracks(tracks, 0) }),
-			a.storedPillButton(p, "stored-shuffle", lucideShuffle, i18n.T("Shuffle"), false, false, len(records) == 0, func() { a.pl.PlayShuffled(tracks); a.heartbeat() }),
-		)
 		selectLabel := i18n.T("Select")
 		if u.selecting {
 			selectLabel = i18n.T("Done")
 		}
-		actions = append(actions, a.storedPillButton(p, "stored-select-mode", lucideListChecks, selectLabel, false, u.selecting, len(records) == 0 && !u.selecting, func() {
+		actions = append(actions, a.storedBarButton(p, "stored-select-mode", lucideListChecks, selectLabel, u.selecting, len(records) == 0 && !u.selecting, func() {
 			u.selecting = !u.selecting
 			if !u.selecting {
 				u.selected = map[string]bool{}
@@ -403,16 +428,42 @@ func (a *app) storedDesktopHeader(p palette) core.Node {
 	if active := a.storedActiveTaskCount(); active > 0 {
 		taskLabelText = fmt.Sprintf("%s (%d)", taskLabelText, active)
 	}
-	actions = append(actions, a.storedPillButton(p, "stored-tasks", lucideDownload, taskLabelText, false, u.tasks, false, func() {
+	actions = append(actions, a.storedBarButton(p, "stored-tasks", lucideDownload, taskLabelText, u.tasks, false, func() {
 		u.tasks = !u.tasks
 		u.resetBrowse()
 		a.bump()
 	}))
+	return core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, FlexShrink: 0}, Children: actions}
+}
 
-	return core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, AlignItems: core.AlignEnd, JustifyContent: core.JustifySpaceBetween, Gap: 12}, Children: []core.Node{
-		core.View{Style: core.Style{FlexShrink: 1, MinWidth: core.Pt(0), Gap: 4}, Children: heading},
-		core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, AlignItems: core.AlignCenter, Gap: 8}, Children: actions},
-	}}
+func (a *app) storedBarButton(p palette, id string, svg *core.SVG, label string, active, disabled bool, onPress func()) core.Node {
+	bg, border, fg := p.hover, p.hairline, p.text
+	hoverBg := p.press
+	if active {
+		bg = p.accent.Faded(0.10)
+		border = p.accent.Faded(0.32)
+		fg = p.accent
+		hoverBg = p.accent.Faded(0.16)
+	}
+	style := core.Style{Height: core.Pt(32), Padding: core.Symmetric(0, 10), Gap: 5, FlexShrink: 0,
+		Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+		CornerRadius: 8, Background: bg, BorderWidth: 1, BorderColor: border, Color: fg}
+	if disabled {
+		style.Opacity = core.Alpha(0.45)
+	} else {
+		style.Hover = &core.Style{Background: hoverBg}
+	}
+	var children []core.Node
+	if svg != nil {
+		children = append(children, icon(svg, 13.5, fg))
+	}
+	children = append(children, text(label, 12.5, core.FontWeightMedium, fg))
+	return base.Button{TestID: id, Label: label, Selected: func() bool { return active }, Disabled: func() bool { return disabled },
+		OnPress: func(core.PressEvent) {
+			if !disabled && onPress != nil {
+				onPress()
+			}
+		}, Style: style, Children: children}
 }
 
 func (a *app) storedPillButton(p palette, id string, svg *core.SVG, label string, primary, active, disabled bool, onPress func()) core.Node {
@@ -465,13 +516,13 @@ func (a *app) storedDesktopConditions(p palette) core.Node {
 		segments = append(segments, base.Button{
 			TestID: "stored-tab-" + it.value, Label: it.label, Selected: func() bool { return selected },
 			OnPress: func(core.PressEvent) { u.mode = it.value; u.tasks = false; u.group = ""; u.resetBrowse(); a.bump() },
-			Style: core.Style{Height: core.Pt(26), Padding: core.Symmetric(0, 10), CornerRadius: 6,
+			Style: core.Style{Height: core.Pt(26), Padding: core.Symmetric(0, 8), CornerRadius: 6,
 				Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
 				Background: bg, Hover: &core.Style{Background: p.sidebar}},
 			Children: []core.Node{text(it.label, 12.5, weight, fg)},
 		})
 	}
-	scopeBar := core.View{Style: core.Style{Height: core.Pt(32), Direction: core.Row, AlignItems: core.AlignCenter,
+	scopeBar := core.View{Style: core.Style{Height: core.Pt(32), FlexShrink: 0, Direction: core.Row, AlignItems: core.AlignCenter,
 		Gap: 2, Padding: core.All(2), Background: p.hover, BorderWidth: 1, BorderColor: p.hairline, CornerRadius: 8},
 		Children: segments}
 
@@ -638,7 +689,7 @@ func (a *app) storedFilterSelect(p palette, id, label string, value *string, pho
 	border := p.hairline
 	fg := p.text
 	fontSize := core.Points(12.5)
-	padH := core.Points(10)
+	padH := core.Points(9)
 	if phone {
 		height = 32
 		itemHeight = 44
@@ -684,7 +735,7 @@ func (a *app) storedFilterSelect(p palette, id, label string, value *string, pho
 			FocusVisible: &core.Style{OutlineWidth: 3, OutlineColor: ui.Alpha(p.accent, .25)}},
 		Trigger: core.View{Style: core.Style{FlexGrow: 1, Direction: core.Row, AlignItems: core.AlignCenter,
 			Padding: core.Symmetric(0, padH), Gap: 6}, Children: []core.Node{
-			core.Text{Content: title, MaxLines: 1, Style: core.Style{FontSize: fontSize, FontWeight: core.FontWeightMedium, Color: fg}},
+			core.Text{TestID: id + "-label", Content: title, MaxLines: 1, Style: core.Style{FontSize: fontSize, FontWeight: core.FontWeightMedium, Color: fg}},
 			icon(lucideChevronDown, 11, fg),
 		}},
 		PopupStyle: core.Style{MinWidth: core.Pt(150), Background: p.sidebar, BorderWidth: 1, BorderColor: p.hairline,
@@ -728,9 +779,9 @@ func (a *app) storedBody(cx *core.Scope, p palette, phone bool) core.Node {
 		}
 		if len(groups) == 0 {
 			if len(all) == 0 {
-				body = append(body, a.emptyNote(p, i18n.T("No saved music yet"), i18n.T("Play online music to cache it, or choose Keep Offline from a song's menu.")))
+				body = append(body, a.emptyNote(p, i18n.T("No downloaded music yet"), i18n.T("Play online music to cache it, or choose Keep Offline from a song's menu.")))
 			} else {
-				body = append(body, a.emptyNote(p, i18n.T("No saved songs match"), i18n.T("Try another search.")))
+				body = append(body, a.emptyNote(p, i18n.T("No downloaded songs match"), i18n.T("Try another search.")))
 			}
 		} else {
 			body = append(body, a.storedGroupGrid(p, groups, u.view))
@@ -747,7 +798,7 @@ func (a *app) storedBody(cx *core.Scope, p palette, phone bool) core.Node {
 
 	if phone {
 		if u.view != "" && u.group != "" {
-			groupName := i18n.T("Saved Music")
+			groupName := i18n.T("Downloaded Music")
 			if chosen != nil {
 				groupName = chosen.name
 			}
@@ -763,11 +814,6 @@ func (a *app) storedBody(cx *core.Scope, p palette, phone bool) core.Node {
 		}
 		body = append(body, core.Text{Content: i18n.Tf("%d songs available on this device", len(records)) + " · " + bytesLabel(size),
 			Style: core.Style{FontSize: phoneFontCaption, Color: p.muted, Margin: core.Edges{Bottom: 10}}})
-		if len(records) > 0 {
-			body = append(body, core.View{Style: core.Style{Margin: core.Edges{Bottom: 12}}, Children: []core.Node{
-				a.storedPhonePlayButtons(p, tracks),
-			}})
-		}
 	}
 
 	if !phone && u.details != "" {
@@ -780,9 +826,9 @@ func (a *app) storedBody(cx *core.Scope, p palette, phone bool) core.Node {
 
 	if len(records) == 0 {
 		if len(all) == 0 {
-			body = append(body, a.emptyNote(p, i18n.T("No saved music yet"), i18n.T("Play online music to cache it, or choose Keep Offline from a song's menu.")))
+			body = append(body, a.emptyNote(p, i18n.T("No downloaded music yet"), i18n.T("Play online music to cache it, or choose Keep Offline from a song's menu.")))
 		} else {
-			body = append(body, a.emptyNote(p, i18n.T("No saved songs match"), i18n.T("Try another search.")))
+			body = append(body, a.emptyNote(p, i18n.T("No downloaded songs match"), i18n.T("Try another search.")))
 		}
 		return a.storedScroll(p, body...)
 	}
@@ -799,21 +845,6 @@ func (a *app) storedBody(cx *core.Scope, p palette, phone bool) core.Node {
 		},
 	})
 	return a.storedScroll(p, body...)
-}
-
-func (a *app) storedPhonePlayButtons(p palette, tracks []music.Track) core.Node {
-	return core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10}, Children: []core.Node{
-		base.Button{TestID: "stored-play-all", Label: i18n.T("Play"), Disabled: func() bool { return len(tracks) == 0 },
-			OnPress: func(core.PressEvent) { a.playTracks(tracks, 0) },
-			Style: core.Style{FlexGrow: 1, Height: core.Pt(44), Direction: core.Row, AlignItems: core.AlignCenter,
-				JustifyContent: core.JustifyCenter, Gap: 8, CornerRadius: 22, Background: p.accent, Active: &core.Style{Opacity: core.Alpha(.8)}},
-			Children: []core.Node{icon(lucidePlay, 17, p.onAccent), text(i18n.T("Play"), 14, core.FontWeightSemibold, p.onAccent)}},
-		base.Button{TestID: "stored-shuffle", Label: i18n.T("Shuffle"), Disabled: func() bool { return len(tracks) == 0 },
-			OnPress: func(core.PressEvent) { a.pl.PlayShuffled(tracks); a.heartbeat() },
-			Style: core.Style{Width: core.Pt(44), Height: core.Pt(44), FlexShrink: 0, CornerRadius: 22, Background: p.sidebar,
-				AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Active: &core.Style{Background: p.press}},
-			Children: []core.Node{icon(lucideShuffle, 19, p.text)}},
-	}}
 }
 
 func (a *app) storedPinnedBatchBar(p palette, phone bool) core.Node {
