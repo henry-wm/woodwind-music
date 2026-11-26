@@ -89,7 +89,7 @@ func (a *app) phoneHeader(cx *core.Scope, p palette) core.Node {
 				}
 				switch r.page {
 				case pageStored:
-					title = i18n.T("Saved Music")
+					title = i18n.T("Downloaded Music")
 				case pageAlbum:
 					title = i18n.T("Album")
 				case pageArtist:

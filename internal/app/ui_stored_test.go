@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -67,10 +68,17 @@ func TestSavedMusicBrowseSearchAndRetentionAcrossPlatforms(t *testing.T) {
 				ui.Press("id:phone-tab-library")
 				ui.Press("id:phone-stored")
 			} else {
+				storedNav := reviewBounds(ui.Find("id:nav-stored"))
+				playlistsNav := reviewBounds(ui.Find("id:nav-playlists"))
+				settingsNav := reviewBounds(ui.Find("id:open-settings"))
+				if storedNav.Origin.Y <= playlistsNav.Origin.Y || storedNav.Origin.Y >= settingsNav.Origin.Y {
+					t.Fatalf("desktop nav-stored should sit in the sidebar footer below nav-playlists and above open-settings: playlists=%+v stored=%+v settings=%+v",
+						playlistsNav, storedNav, settingsNav)
+				}
 				ui.Press("id:nav-stored")
 			}
 			ui.Find("id:stored-page")
-			ui.Find("id:stored-filter-bar")
+			filterBarBounds := reviewBounds(ui.Find("id:stored-filter-bar"))
 			pageBounds := reviewBounds(ui.Find("id:stored-page"))
 			searchBounds := reviewBounds(ui.Find("id:stored-search-box"))
 			if platform == core.OSAndroid {
@@ -81,8 +89,29 @@ func TestSavedMusicBrowseSearchAndRetentionAcrossPlatforms(t *testing.T) {
 				if searchBounds.Size.Height > 36 || searchBounds.Size.Width >= pageBounds.Size.Width*0.5 {
 					t.Fatalf("desktop search box should stay compact and not span the full width: search=%+v page=%+v", searchBounds, pageBounds)
 				}
+				selectBounds := reviewBounds(ui.Find("id:stored-select-mode"))
+				tasksBounds := reviewBounds(ui.Find("id:stored-tasks"))
+				searchMidY := searchBounds.Origin.Y + searchBounds.Size.Height/2
+				for name, b := range map[string]core.Bounds{"select": selectBounds, "tasks": tasksBounds} {
+					midY := b.Origin.Y + b.Size.Height/2
+					if math.Abs(float64(midY-searchMidY)) > 2 {
+						t.Fatalf("desktop %s button not aligned on filter row: %s=%+v search=%+v bar=%+v", name, name, b, searchBounds, filterBarBounds)
+					}
+					if b.Origin.Y < filterBarBounds.Origin.Y-1 || b.Origin.Y+b.Size.Height > filterBarBounds.Origin.Y+filterBarBounds.Size.Height+1 {
+						t.Fatalf("desktop %s button escaped filter bar: %s=%+v bar=%+v", name, name, b, filterBarBounds)
+					}
+				}
 			}
-			for _, id := range []string{"stored-source", "stored-quality", "stored-complete", "stored-select-all", "stored-select-none", "stored-pin", "stored-unpin", "stored-delete", "stored-batch-bar"} {
+			for _, pair := range [][2]string{{"stored-view", "stored-view-label"}, {"stored-sort", "stored-sort-label"}} {
+				triggerBounds := reviewBounds(ui.Find("id:" + pair[0]))
+				labelBounds := reviewBounds(ui.Find("id:" + pair[1]))
+				triggerMidY := triggerBounds.Origin.Y + triggerBounds.Size.Height/2
+				labelMidY := labelBounds.Origin.Y + labelBounds.Size.Height/2
+				if math.Abs(float64(labelMidY-triggerMidY)) > 1.5 {
+					t.Fatalf("%s label not vertically centered: label=%+v trigger=%+v", pair[0], labelBounds, triggerBounds)
+				}
+			}
+			for _, id := range []string{"stored-play-all", "stored-shuffle", "stored-source", "stored-quality", "stored-complete", "stored-select-all", "stored-select-none", "stored-pin", "stored-unpin", "stored-delete", "stored-batch-bar"} {
 				if ui.Exists("id:" + id) {
 					t.Fatalf("unneeded initial control remains: %s", id)
 				}
@@ -293,6 +322,34 @@ func TestSavedMusicUnifiedRowsMenusAndGroups(t *testing.T) {
 		if a.diskUI.group != "" {
 			t.Fatal("group back did not return to album grid")
 		}
+		ui.Press("id:stored-tasks")
+		ui.Find("id:stored-tasks-back")
+		ui.Press("id:stored-tasks-back")
+		if a.diskUI.tasks {
+			t.Fatal("tasks back did not return to downloaded music")
+		}
+	})
+
+	t.Run("desktop_zh_cn_copy", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("WOOD_WIND_MUSIC_DATA_DIR", dir)
+		seedStored(t, dir)
+		var a *app
+		ui := nsgotest.Start(t, func(cx *core.Scope) core.Node { a = newApp(cx); return a.view(cx) },
+			nsgotest.Size(1180, 780), nsgotest.Environment(core.Environment{OS: core.OSMacOS, Locale: "zh-CN"}))
+		ui.WaitUntil(time.Second, func() bool { return !a.homeBusy })
+		nav := ui.Find("id:nav-stored")
+		labeled := ui.Find(`label:"已下载音乐"`)
+		if labeled.ID != nav.ID {
+			t.Fatalf("nav-stored (%v) did not match label 已下载音乐 (%v)", nav.ID, labeled.ID)
+		}
+		ui.Press("id:nav-stored")
+		if got := len(ui.QueryMounted(`text:"已下载音乐"`)); got < 2 {
+			t.Fatalf("expected 已下载音乐 in both sidebar and page heading, got %d", got)
+		}
+		if ui.Exists(`text:"已存音乐"`) {
+			t.Fatal("stale 已存音乐 label still mounted")
+		}
 	})
 
 	t.Run("phone", func(t *testing.T) {
@@ -304,6 +361,10 @@ func TestSavedMusicUnifiedRowsMenusAndGroups(t *testing.T) {
 			nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{OS: core.OSAndroid, Locale: "zh-CN", SafeArea: core.Edges{Top: 24, Bottom: 24}}))
 		ui.WaitUntil(time.Second, func() bool { return !a.homeBusy })
 		ui.Press("id:phone-tab-library")
+		storedRow := ui.Find("id:phone-stored")
+		if labeled := ui.Find(`label:"已下载音乐"`); labeled.ID != storedRow.ID {
+			t.Fatalf("phone-stored (%v) did not match label 已下载音乐 (%v)", storedRow.ID, labeled.ID)
+		}
 		ui.Press("id:phone-stored")
 		ui.Find("id:stored-page")
 		firstID := offline.Key(tracks[0].Source, tracks[0].ID)

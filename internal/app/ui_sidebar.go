@@ -34,7 +34,6 @@ func (a *app) sidebar(cx *core.Scope, top core.Points) core.Node {
 					r := a.route.Get()
 					return core.View{Style: core.Style{Direction: core.Column, Gap: 2, Padding: core.Symmetric(2, 0)}, Children: []core.Node{
 						core.Group{
-							a.navItem(p, "nav-stored", lucide.Download(), i18n.T("Saved Music"), r.page == pageStored, func() { a.openStored() }),
 							core.Group(a.sourceNavigation(p, r, false)),
 							core.Show{When: func() bool { return a.lastSearch.query != "" },
 								Then: func(*core.Scope) core.Node {
@@ -130,9 +129,15 @@ func (a *app) navItem(p palette, id string, svg *core.SVG, label string, selecte
 	return b
 }
 
-// sidebarFooter is the settings and the folders.
+// sidebarFooter holds the global downloaded-music entry and the account/settings row.
 func (a *app) sidebarFooter(p palette) core.Node {
-	return core.View{Style: core.Style{Direction: core.Column, Gap: 2, Padding: core.Edges{Top: 8}}, Children: []core.Node{
+	return core.View{Style: core.Style{Direction: core.Column, Gap: 4, Padding: core.Edges{Top: 8},
+		Borders: core.Edges{Top: 1}, BorderColor: p.hairline}, Children: []core.Node{
+		core.Dynamic(func(cx *core.Scope) core.Node {
+			a.rev.Get()
+			r := a.route.Get()
+			return a.navItem(p, "nav-stored", lucide.Download(), i18n.T("Downloaded Music"), r.page == pageStored, func() { a.openStored() })
+		}),
 		core.Dynamic(func(cx *core.Scope) core.Node { a.rev.Get(); return a.accountRow(p) }),
 	}}
 }

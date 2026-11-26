@@ -449,7 +449,7 @@ func (a *app) cacheRows() []settingsRowDef {
 		}}
 	}},
 		{label: i18n.T("Automatic Cache Limit"), control: a.cacheControl},
-		{label: i18n.T("Saved Music"), sub: a.storedUsage(), control: func(p palette) core.Node {
+		{label: i18n.T("Downloaded Music"), sub: a.storedUsage(), control: func(p palette) core.Node {
 			return a.settingsAction(p, i18n.T("Manage"), "settings-stored", false, func() {
 				a.settingsInMain = false
 				if a.settingsWin != nil {
