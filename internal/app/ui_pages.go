@@ -36,6 +36,8 @@ func (a *app) page(cx *core.Scope, p palette) core.Node {
 		return a.phoneLibrary(cx, p)
 	case pageLiked:
 		return a.likedPage(cx, p)
+	case pagePlaylists:
+		return a.playlistsPage(cx, p)
 	case pagePlaylist:
 		return a.playlistPage(cx, p, r.id)
 	case pageAlbum:
@@ -387,7 +389,7 @@ func (a *app) playlistCard(p palette, pl music.Playlist) core.Node {
 		return a.cardFrame(p, pl.Name, playlistLine(pl), 12, a.coverArt(p, pl.ImageURL, 12, lucideList), func() { a.open(route{page: pagePlaylist, id: id}) })
 	}
 	art := core.View{Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)}, Children: []core.Node{
-		a.coverArt(p, pl.ImageURL, 10, lucideNote),
+		a.coverArt(p, a.playlistCoverURL(pl), 10, lucideNote),
 		a.coverPlayButton(p, func() { a.playPlaylist(id) }),
 	}}
 	card := a.cardFrame(p, pl.Name, playlistLine(pl), 10, art, func() { a.open(route{page: pagePlaylist, id: id}) })

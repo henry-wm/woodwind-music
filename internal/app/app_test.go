@@ -274,8 +274,9 @@ func TestCreatesPlaylistAndLikes(t *testing.T) {
 		return a.local.TrackCount() == 1 && !a.local.Scanning() && !a.homeBusy && a.home != nil && len(a.home.Sections) > 0
 	})
 
-	// A playlist named in the dialog.
-	app.Press("label:New Playlist")
+	// A playlist named in the dialog from the Playlists page.
+	app.Press("id:nav-playlists")
+	app.Press("id:new-playlist")
 	app.Type("id:playlist-name", "Roadtrip")
 	app.Press("id:name-save")
 	app.WaitUntil(5*time.Second, func() bool { return app.Exists("text:Roadtrip") })
