@@ -2,12 +2,83 @@ package app
 
 import (
 	"strings"
+	"time"
 
 	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
 
 	"github.com/HengWh/woodwind-music/internal/i18n"
 )
+
+// suggestDelay is how long typing pauses before asking the active source for
+// search suggestions.
+var suggestDelay = 220 * time.Millisecond
+
+type suggestState struct {
+	query   string
+	srcID   string
+	items   []string
+	loading bool
+	timer   *time.Timer
+}
+
+func (a *app) requestSuggestions(raw string) {
+	q := strings.TrimSpace(raw)
+	if q == "" || !a.can("suggest") {
+		a.dismissSuggestions()
+		return
+	}
+	src := a.source()
+	srcID := src.Info().ID
+	if a.suggestions.query == q && a.suggestions.srcID == srcID {
+		return
+	}
+	if a.suggestions.timer != nil {
+		a.suggestions.timer.Stop()
+	}
+	a.suggestions = suggestState{query: q, srcID: srcID, loading: true}
+	if a.suggestRev != nil {
+		a.suggestRev.Update(func(n int) int { return n + 1 })
+	}
+	a.suggestions.timer = time.AfterFunc(suggestDelay, func() {
+		items, err := src.Suggest(q)
+		a.post(func() {
+			if a.cx.Disposed() || a.suggestions.query != q || a.suggestions.srcID != srcID || a.source() != src {
+				return
+			}
+			a.suggestions.timer = nil
+			a.suggestions.loading = false
+			if err == nil {
+				filtered := make([]string, 0, min(len(items), 10))
+				for _, item := range items {
+					if s := strings.TrimSpace(item); s != "" {
+						filtered = append(filtered, s)
+						if len(filtered) >= 10 {
+							break
+						}
+					}
+				}
+				a.suggestions.items = filtered
+			} else {
+				a.suggestions.items = nil
+			}
+			if a.suggestRev != nil {
+				a.suggestRev.Update(func(n int) int { return n + 1 })
+			}
+		})
+	})
+}
+
+func (a *app) dismissSuggestions() {
+	had := a.suggestions.query != "" || len(a.suggestions.items) > 0 || a.suggestions.loading
+	if a.suggestions.timer != nil {
+		a.suggestions.timer.Stop()
+	}
+	a.suggestions = suggestState{}
+	if had && a.suggestRev != nil && a.cx != nil && !a.cx.Disposed() {
+		a.suggestRev.Update(func(n int) int { return n + 1 })
+	}
+}
 
 func (a *app) searchField(p palette) core.Node { return searchBox{a, p} }
 
@@ -20,13 +91,29 @@ type searchSuggestion struct {
 // input with a selected title. The input always shows the user's query.
 func (a *app) searchSuggestions() []searchSuggestion {
 	a.rev.Get()
+	if a.suggestRev != nil {
+		a.suggestRev.Get()
+	}
 	q := strings.TrimSpace(a.query.Get())
 	var items []searchSuggestion
+	seen := map[string]bool{}
 	if q != "" {
 		items = append(items, searchSuggestion{query: q, title: i18n.Tf("Search for “%s”", q)})
+		seen[strings.ToLower(q)] = true
+		if a.suggestions.query == q && a.suggestions.srcID == a.source().Info().ID {
+			for _, s := range a.suggestions.items {
+				key := strings.ToLower(s)
+				if !seen[key] {
+					seen[key] = true
+					items = append(items, searchSuggestion{query: s, title: s})
+				}
+			}
+		}
 	}
 	for _, h := range a.set.SearchHistory {
-		if q == "" || !strings.EqualFold(h, q) && strings.Contains(strings.ToLower(h), strings.ToLower(q)) {
+		key := strings.ToLower(h)
+		if q == "" || (!seen[key] && strings.Contains(key, strings.ToLower(q))) {
+			seen[key] = true
 			items = append(items, searchSuggestion{query: h, title: h})
 		}
 	}
@@ -84,9 +171,9 @@ func (s searchBox) Render(cx *core.Scope) core.Node {
 				core.Input{Ref: a.searchRef, TestID: "search-input", Label: i18n.T("Search"), Placeholder: i18n.T("Search"),
 					Value: a.query.Get, NoAutoCorrect: true, Role: core.RoleCombobox, Expanded: a.searchOpen.Get,
 					SubmitBehavior:      core.SubmitBehaviorSubmit,
-					OnFocus:             func() { focused.Set(true); selected.Set(-1); a.searchOpen.Set(true) },
-					OnBlur:              func() { focused.Set(false); close() },
-					OnChange:            func(q string) { a.query.Set(q); selected.Set(-1); a.searchOpen.Set(true) },
+					OnFocus:             func() { focused.Set(true); selected.Set(-1); a.searchOpen.Set(true); a.requestSuggestions(a.query.GetUntracked()) },
+					OnBlur:              func() { focused.Set(false); close(); a.dismissSuggestions() },
+					OnChange:            func(q string) { a.query.Set(q); selected.Set(-1); a.searchOpen.Set(true); a.requestSuggestions(q) },
 					OnCompositionChange: func(c core.Composition) { composing.Set(c.Composing) },
 					OnSubmit: func(q string) {
 						if composing.GetUntracked() {

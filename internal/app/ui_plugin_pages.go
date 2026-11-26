@@ -117,18 +117,27 @@ func (a *app) showCard(p palette, show music.Show) core.Node {
 func (a *app) stationCard(p palette, station music.Station) core.Node {
 	return a.cardFrame(p, station.Name, station.Description, 10, a.coverArt(p, station.ImageURL, 10, lucide.Radio()), func() { a.playStation(station) })
 }
+func (a *app) builtinTitle(builtin, fallback string) string {
+	for _, item := range a.source().Info().Navigation {
+		if item.Builtin == builtin && item.Title != "" {
+			return item.Title
+		}
+	}
+	return i18n.T(fallback)
+}
+
 func (a *app) extraPage(cx *core.Scope, p palette, r route) core.Node {
 	d := a.extra[r]
 	if d == nil || d.busy && !d.loaded {
 		return a.loadingPage(p)
 	}
 	var body []core.Node
-	title := i18n.T("Podcasts")
+	title := a.builtinTitle("shows", "Podcasts")
 	if r.page == pageComments {
 		title = i18n.T("Comments")
 	}
 	if r.page == pageSavedAlbums {
-		title = i18n.T("Saved Albums")
+		title = a.builtinTitle("savedAlbums", "Saved Albums")
 	}
 	if d.show != nil {
 		title = d.show.Name
@@ -138,9 +147,36 @@ func (a *app) extraPage(cx *core.Scope, p palette, r route) core.Node {
 		body = append(body, text(d.err, 14, core.FontWeightNormal, p.accent), a.settingsAction(p, i18n.T("Retry"), "source-retry", d.busy, func() { d.loaded = false; a.loadExtra(r, false); a.bump() }))
 	}
 	if d.show != nil {
-		body = append(body, text(d.show.Description, 14, core.FontWeightNormal, p.muted))
+		show := *d.show
+		if show.Publisher != "" || show.EpisodeCount > 0 {
+			var meta []core.Node
+			if show.Publisher != "" {
+				if show.PublisherPage != "" {
+					pageID := show.PublisherPage
+					meta = append(meta, base.Button{TestID: "show-publisher", Label: show.Publisher,
+						OnPress:  func(core.PressEvent) { a.open(route{page: pageBrowse, id: pageID}) },
+						Style:    core.Style{Padding: core.Symmetric(2, 0), Hover: &core.Style{Opacity: core.Alpha(0.75)}},
+						Children: []core.Node{text(show.Publisher, 13.5, core.FontWeightMedium, p.accent)}})
+				} else {
+					meta = append(meta, text(show.Publisher, 13.5, core.FontWeightNormal, p.muted))
+				}
+			}
+			if show.EpisodeCount > 0 {
+				if len(meta) > 0 {
+					meta = append(meta, text(" · ", 13.5, core.FontWeightNormal, p.muted))
+				}
+				epText := i18n.Tf("%d episodes", show.EpisodeCount)
+				if show.EpisodeCount == 1 {
+					epText = i18n.T("1 episode")
+				}
+				meta = append(meta, text(epText, 13.5, core.FontWeightNormal, p.muted))
+			}
+			body = append(body, core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Margin: core.Edges{Bottom: 8}}, Children: meta})
+		}
+		if show.Description != "" {
+			body = append(body, text(show.Description, 14, core.FontWeightNormal, p.muted))
+		}
 		if a.can("subscribeShow") {
-			show := *d.show
 			label := i18n.T("Subscribe")
 			if show.Subscribed {
 				label = i18n.T("Unsubscribe")

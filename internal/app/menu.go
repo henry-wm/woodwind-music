@@ -42,6 +42,8 @@ func (a *app) menu(cx *core.Scope) {
 		{Label: i18n.T("Next"), Shortcut: "mod+right", OnSelect: a.pl.Next},
 		{Label: i18n.T("Previous"), Shortcut: "mod+left", OnSelect: a.pl.Prev},
 		{Separator: true},
+		{Label: i18n.T("Like/Unlike"), Shortcut: "mod+d", OnSelect: a.likeCurrent},
+		{Separator: true},
 		{Label: i18n.T("Playback Mode"), Items: []desktop.MenuItem{
 			{Label: i18n.T("List Loop"), Checkable: true, Checked: a.pl.PlaybackMode() == player.ModeListLoop, OnSelect: func() { a.setPlaybackMode(player.ModeListLoop) }},
 			{Label: i18n.T("Single-track Loop"), Checkable: true, Checked: a.pl.PlaybackMode() == player.ModeSingleLoop, OnSelect: func() { a.setPlaybackMode(player.ModeSingleLoop) }},

@@ -271,6 +271,10 @@ func (a *app) browseSection(p palette, sec music.Section, pageID string, index i
 			return a.linkCard(p, l)
 		}))
 	}
+	if len(sec.Tracks)+len(sec.Albums)+len(sec.Artists)+len(sec.Playlists)+len(sec.Shows)+len(sec.Stations)+len(sec.Links) == 0 && sec.Empty != "" {
+		out = append(out, core.View{Style: core.Style{Padding: core.Edges{Top: 4, Right: 12, Bottom: 8, Left: 12}},
+			Children: []core.Node{text(sec.Empty, 13.5, core.FontWeightNormal, p.muted)}})
+	}
 	return out
 }
 
@@ -671,11 +675,12 @@ func (a *app) likedCover(p palette, tracks []music.Track) core.Node {
 }
 
 func (a *app) likedPage(cx *core.Scope, p palette) core.Node {
+	title := a.builtinTitle("liked", "Liked Songs")
 	tracks := a.liked
 	pic := a.likedCover(p, tracks)
 	if len(tracks) == 0 {
 		return a.pageScroll(p,
-			a.hero(p, pic, i18n.T("Playlist"), i18n.T("Liked Songs"), i18n.Songs(0), nil),
+			a.hero(p, pic, i18n.T("Playlist"), title, i18n.Songs(0), nil),
 			core.View{Style: core.Style{Direction: core.Column, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(48, 0)}, Children: []core.Node{
 				icon(lucideHeart, 32, p.faint),
 				text(i18n.T("Songs you like will show here"), a.headingSize(20, 18), a.headingWeight(), p.text),
@@ -683,7 +688,7 @@ func (a *app) likedPage(cx *core.Scope, p palette) core.Node {
 			}})
 	}
 	return a.pageScroll(p,
-		a.hero(p, pic, i18n.T("Playlist"), i18n.T("Liked Songs"), i18n.Songs(len(tracks)), tracks),
+		a.hero(p, pic, i18n.T("Playlist"), title, i18n.Songs(len(tracks)), tracks),
 		a.trackList(p, tracks, true, false, a.currentID()),
 	)
 }

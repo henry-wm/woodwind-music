@@ -12,6 +12,7 @@ import (
 
 	"github.com/HengWh/woodwind-music/internal/i18n"
 	"github.com/HengWh/woodwind-music/internal/lyrics"
+	"github.com/HengWh/woodwind-music/internal/music"
 )
 
 // The stage sets a song's lyrics as Folia's visualizers do: Flow, its classic,
@@ -111,6 +112,41 @@ func (a *app) stageView(cx *core.Scope, p palette, white core.Color) core.Node {
 		}}
 	}
 
+	if loaded {
+		active := core.NewMemo(cx, func() *music.Comment {
+			a.tick.Get()
+			a.rev.Get()
+			if a.commentRev != nil {
+				a.commentRev.Get()
+			}
+			return a.quietComment(a.pl.Current(), lines, loaded, a.pl.Position())
+		})
+		under := content
+		content = core.View{Style: core.Style{FlexGrow: 1, MinHeight: core.Pt(0), Direction: core.Column}, Children: []core.Node{
+			core.View{Style: core.Style{FlexGrow: 1, MinHeight: core.Pt(0), Direction: core.Column}, StyleFunc: func() core.Style {
+				alpha := float32(1)
+				if active.Get() != nil {
+					alpha = 0.08
+				}
+				duration := 400 * time.Millisecond
+				if cx.Env().ReduceMotion() {
+					duration = 0
+				}
+				return core.Style{Opacity: core.Alpha(alpha), Transition: core.Transition{Duration: duration, Properties: core.TransitionOpacity}}
+			}, Children: []core.Node{under}},
+			core.Dynamic(func(*core.Scope) core.Node {
+				cm := active.Get()
+				if cm == nil {
+					return core.Group{}
+				}
+				return core.View{Style: core.Style{Position: core.Absolute, Top: core.Pt(0), Right: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(0),
+					Direction: core.Column, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, Children: []core.Node{
+					a.hotCommentCard(cm, 28, 720, func() { a.npPane.Set(npPaneComments) }),
+				}}
+			}),
+		}}
+	}
+
 	return core.View{Style: core.Style{FlexGrow: 1, MinHeight: core.Pt(0), Direction: core.Column}, Children: []core.Node{
 		header,
 		core.View{Style: core.Style{FlexGrow: 1, MinHeight: core.Pt(0), Direction: core.Column, Padding: core.Edges{Left: 44, Right: 44}},
@@ -191,6 +227,7 @@ func (a *app) stageBar(cx *core.Scope, p palette, white core.Color) core.Node {
 func (a *app) drawStage(d *core.Drawing, size core.Size, lines []lyrics.Line, accent, white core.Color) {
 	pos := a.pl.Position()
 	cur := lyrics.Index(lines, pos)
+	lang := lyrics.Lang(lines)
 	w, h := float32(size.Width), float32(size.Height)
 	f := min(64, max(36, w*0.045))
 	if cur < 0 {
@@ -199,10 +236,10 @@ func (a *app) drawStage(d *core.Drawing, size core.Size, lines []lyrics.Line, ac
 	}
 	if cur > 0 {
 		if gone := float32((pos - lines[cur].At).Seconds()) / 0.4; gone < 1 {
-			a.drawStageLine(d, &lines[cur-1], pos, f, w, h, 1-stageEaseOutCubic(gone), accent, white, true)
+			a.drawStageLine(d, &lines[cur-1], pos, f, w, h, 1-stageEaseOutCubic(gone), accent, white, lang, true)
 		}
 	}
-	a.drawStageLine(d, &lines[cur], pos, f, w, h, 1, accent, white, false)
+	a.drawStageLine(d, &lines[cur], pos, f, w, h, 1, accent, white, lang, false)
 	if lines[cur].Translation != "" {
 		d.SetTextAlign(core.TextAlignCenter)
 		d.SetTextBaseline(core.BaselineMiddle)
@@ -213,18 +250,18 @@ func (a *app) drawStage(d *core.Drawing, size core.Size, lines []lyrics.Line, ac
 		d.SetTextAlign(core.TextAlignCenter)
 		d.SetTextBaseline(core.BaselineMiddle)
 		d.SetFillColor(core.RGBA(0xffffff, 0.30))
-		d.FillText(lines[cur+1].Text, w/2, h-24, core.Font{Size: 14, Weight: core.FontWeightNormal})
+		d.FillText(lines[cur+1].Text, w/2, h-24, core.Font{Size: 14, Weight: core.FontWeightNormal, Language: lang})
 	}
 }
 
-func (a *app) drawStageLine(d *core.Drawing, l *lyrics.Line, pos time.Duration, f, w, h, fade float32, accent, white core.Color, previous bool) {
+func (a *app) drawStageLine(d *core.Drawing, l *lyrics.Line, pos time.Duration, f, w, h, fade float32, accent, white core.Color, lang string, previous bool) {
 	switch a.set.StageStyle {
 	case "tilt":
-		a.drawTiltLine(d, l, pos, w, h, fade, accent, white)
+		a.drawTiltLine(d, l, pos, w, h, fade, accent, white, lang)
 	case "partita":
-		a.drawPartitaLine(d, l, pos, f, w, h, fade, accent, white)
+		a.drawPartitaLine(d, l, pos, f, w, h, fade, accent, white, lang)
 	default:
-		a.drawFlowLine(d, l, pos, f, w, h, fade, accent, white, previous)
+		a.drawFlowLine(d, l, pos, f, w, h, fade, accent, white, lang, previous)
 	}
 }
 
@@ -280,20 +317,20 @@ func stageEaseOutCubic(t float32) float32 {
 	return 1 - (1-t)*(1-t)*(1-t)
 }
 
-func stageTextWidth(d *core.Drawing, s string, f float32, weight core.FontWeight) float32 {
+func stageTextWidth(d *core.Drawing, s string, f float32, weight core.FontWeight, lang string) float32 {
 	if s == "" {
 		return 0
 	}
-	return d.MeasureText(s, core.Font{Size: core.Points(f), Weight: weight})
+	return d.MeasureText(s, core.Font{Size: core.Points(f), Weight: weight, Language: lang})
 }
 
 // stageShapes lays out the words of a line at font size f.
-func stageShapes(d *core.Drawing, l *lyrics.Line, f float32) []stageShape {
+func stageShapes(d *core.Drawing, l *lyrics.Line, f float32, lang string) []stageShape {
 	seed := float64(l.At / time.Millisecond)
 	shapes := make([]stageShape, len(l.Words))
 	widths := make([]float32, len(l.Words))
 	for i, word := range l.Words {
-		widths[i] = stageTextWidth(d, word.Text, f, core.FontWeightBold)
+		widths[i] = stageTextWidth(d, word.Text, f, core.FontWeightBold, lang)
 	}
 	for i := range l.Words {
 		ws := seed + float64(i)
@@ -320,12 +357,12 @@ func stageShapes(d *core.Drawing, l *lyrics.Line, f float32) []stageShape {
 	return shapes
 }
 
-func layoutFlow(d *core.Drawing, l *lyrics.Line, f, maxW float32) []stageRowPlace {
-	shapes := stageShapes(d, l, f)
+func layoutFlow(d *core.Drawing, l *lyrics.Line, f, maxW float32, lang string) []stageRowPlace {
+	shapes := stageShapes(d, l, f, lang)
 	var rows []stageRowPlace
 	var row stageRowPlace
 	for i, word := range l.Words {
-		width := stageTextWidth(d, word.Text, f, core.FontWeightBold)
+		width := stageTextWidth(d, word.Text, f, core.FontWeightBold, lang)
 		margin := float32(0)
 		if i < len(shapes) {
 			margin = shapes[i].margin
@@ -367,9 +404,9 @@ func layoutFlow(d *core.Drawing, l *lyrics.Line, f, maxW float32) []stageRowPlac
 	return rows
 }
 
-func (a *app) drawFlowLine(d *core.Drawing, l *lyrics.Line, pos time.Duration, f, w, h, fade float32, accent, white core.Color, previous bool) {
+func (a *app) drawFlowLine(d *core.Drawing, l *lyrics.Line, pos time.Duration, f, w, h, fade float32, accent, white core.Color, lang string, previous bool) {
 	maxW := w * 0.80
-	rows := layoutFlow(d, l, f, maxW)
+	rows := layoutFlow(d, l, f, maxW, lang)
 	if len(rows) == 0 {
 		return
 	}
@@ -384,12 +421,12 @@ func (a *app) drawFlowLine(d *core.Drawing, l *lyrics.Line, pos time.Duration, f
 	}
 	for ri, row := range rows {
 		for _, place := range row.words {
-			a.drawFlowWord(d, place, pos, f, originX, originY+float32(ri)*lineH, fade, accent, white)
+			a.drawFlowWord(d, place, pos, f, originX, originY+float32(ri)*lineH, fade, accent, white, lang)
 		}
 	}
 }
 
-func (a *app) drawFlowWord(d *core.Drawing, place stageWordPlace, pos time.Duration, f, originX, originY, fade float32, accent, white core.Color) {
+func (a *app) drawFlowWord(d *core.Drawing, place stageWordPlace, pos time.Duration, f, originX, originY, fade float32, accent, white core.Color, lang string) {
 	word, shape := place.word, place.shape
 	const lookahead = 80 * time.Millisecond
 	since := float32((pos - (word.Start - lookahead)).Seconds())
@@ -416,7 +453,7 @@ func (a *app) drawFlowWord(d *core.Drawing, place stageWordPlace, pos time.Durat
 	}
 	cx := originX + place.x + place.size/2 + x
 	cy := originY + y
-	font := core.Font{Size: core.Points(f), Weight: core.FontWeightBold}
+	font := core.Font{Size: core.Points(f), Weight: core.FontWeightBold, Language: lang}
 	d.Save()
 	d.SetTextAlign(core.TextAlignCenter)
 	d.SetTextBaseline(core.BaselineMiddle)
@@ -570,7 +607,7 @@ func stageTiltParts(l *lyrics.Line) []stagePart {
 	return parts
 }
 
-func (a *app) drawTiltLine(d *core.Drawing, l *lyrics.Line, pos time.Duration, w, h, fade float32, accent, white core.Color) {
+func (a *app) drawTiltLine(d *core.Drawing, l *lyrics.Line, pos time.Duration, w, h, fade float32, accent, white core.Color, lang string) {
 	parts := stageTiltParts(l)
 	if len(parts) == 0 {
 		return
@@ -587,7 +624,7 @@ func (a *app) drawTiltLine(d *core.Drawing, l *lyrics.Line, pos time.Duration, w
 		if part.lean {
 			spacing = 0.15
 		}
-		return stageTextWidth(d, text, size, core.FontWeightNormal) + float32(utf8.RuneCountInString(text))*size*spacing
+		return stageTextWidth(d, text, size, core.FontWeightNormal, lang) + float32(utf8.RuneCountInString(text))*size*spacing
 	}
 	widest := float32(0)
 	for _, part := range parts {
@@ -600,11 +637,11 @@ func (a *app) drawTiltLine(d *core.Drawing, l *lyrics.Line, pos time.Duration, w
 	blockH := float32(len(parts))*lineH + float32(len(parts)-1)*14
 	y := h/2 - blockH/2 + lineH/2
 	for pi, part := range parts {
-		a.drawTiltPart(d, l, part, pos, size, w, y+float32(pi)*(lineH+14), fade, accent, white, pi == len(parts)-1)
+		a.drawTiltPart(d, l, part, pos, size, w, y+float32(pi)*(lineH+14), fade, accent, white, lang, pi == len(parts)-1)
 	}
 }
 
-func (a *app) drawTiltPart(d *core.Drawing, l *lyrics.Line, part stagePart, pos time.Duration, size, w, y, fade float32, accent, white core.Color, last bool) {
+func (a *app) drawTiltPart(d *core.Drawing, l *lyrics.Line, part stagePart, pos time.Duration, size, w, y, fade float32, accent, white core.Color, lang string, last bool) {
 	words := l.Words[part.from:part.to]
 	if len(words) == 0 {
 		return
@@ -620,13 +657,13 @@ func (a *app) drawTiltPart(d *core.Drawing, l *lyrics.Line, part stagePart, pos 
 		weight, spacing, gap = core.FontWeightLight, 0.15, 0.35
 		color = accent
 	}
-	rowFont := core.Font{Size: core.Points(size), Weight: weight}
+	rowFont := core.Font{Size: core.Points(size), Weight: weight, Language: lang}
 	text := ""
 	for _, word := range words {
 		text += word.Text
 	}
 	text = strings.TrimSpace(text)
-	rowW := stageTextWidth(d, text, size, weight) + float32(utf8.RuneCountInString(text))*size*spacing
+	rowW := stageTextWidth(d, text, size, weight, lang) + float32(utf8.RuneCountInString(text))*size*spacing
 	if part.tail {
 		size *= 1.18
 		rowFont.Size = core.Points(size)
@@ -668,7 +705,7 @@ func (a *app) drawTiltPart(d *core.Drawing, l *lyrics.Line, part stagePart, pos 
 			scale := 1 + swell*pulse
 			shown := stageEaseOutCubic((since - float32(k)*0.04) / 0.5)
 			alpha := in * shown * fade
-			wRune := stageTextWidth(d, string(r), size, weight)
+			wRune := stageTextWidth(d, string(r), size, weight, lang)
 			cx := x + wRune/2
 			cy := y + rise
 			if part.lean {
@@ -702,7 +739,7 @@ func (a *app) drawTiltPart(d *core.Drawing, l *lyrics.Line, part stagePart, pos 
 }
 
 // drawPartitaLine stacks a line in a few staggered rows, each with a guide.
-func (a *app) drawPartitaLine(d *core.Drawing, l *lyrics.Line, pos time.Duration, f, w, h, fade float32, accent, white core.Color) {
+func (a *app) drawPartitaLine(d *core.Drawing, l *lyrics.Line, pos time.Duration, f, w, h, fade float32, accent, white core.Color, lang string) {
 	units := stageUnits(l.Words)
 	if len(units) == 0 {
 		return
@@ -739,7 +776,7 @@ func (a *app) drawPartitaLine(d *core.Drawing, l *lyrics.Line, pos time.Duration
 		for _, word := range words {
 			text += word.Text
 		}
-		rowW := stageTextWidth(d, text, f, core.FontWeightBold)
+		rowW := stageTextWidth(d, text, f, core.FontWeightBold, lang)
 		stagger := 20 + stageRandom(seed, float64(ri)+1)*80
 		x := (w-rowW)/2 + stagger
 		if ri%2 == 0 {
@@ -787,9 +824,9 @@ func (a *app) drawPartitaLine(d *core.Drawing, l *lyrics.Line, pos time.Duration
 				rotate: (stageRandom(seed+float64(wi), 3) - 0.5) * 6,
 				scale:  0.8 + stageRandom(seed+float64(wi), 4)*0.9,
 				drift:  (stageRandom(seed+float64(wi), 8) - 0.5) * 20}
-			wd := stageTextWidth(d, word.Text, f, core.FontWeightBold)
+			wd := stageTextWidth(d, word.Text, f, core.FontWeightBold, lang)
 			place := stageWordPlace{word: word, shape: shape, x: x, y: 0, size: wd}
-			a.drawFlowWord(d, place, pos, f, 0, y, fade*grow, accent, white)
+			a.drawFlowWord(d, place, pos, f, 0, y, fade*grow, accent, white, lang)
 			x += wd + f*0.08
 		}
 	}

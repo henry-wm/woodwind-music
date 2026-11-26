@@ -350,13 +350,21 @@ func (a *app) settingsCategories(p palette) []settingsCatDef {
 	general := settingsCatDef{id: "general", label: i18n.T("General"), icon: lucide.Settings(),
 		groups: []settingsGroupDef{{rows: a.generalRows()}}}
 
+	playbackRows := []settingsRowDef{
+		{label: i18n.T("Quality"), sub: i18n.T("What's asked of plugins that have a choice, from the next song on"),
+			control: a.qualityControl},
+		{label: i18n.T("Even Out Loudness"), sub: i18n.T("Adjust each song's volume by what its plugin measured of it, for them to sound as loud as each other"),
+			control: a.normalizeControl},
+	}
+	if !(a.settingsInMain && a.phoneLayout(a.cx)) {
+		playbackRows = append(playbackRows, settingsRowDef{
+			label:   i18n.T("Top Comments in Quiet Parts"),
+			sub:     i18n.T("In intros, breaks and outros, a song's top comments show in place of the lyrics"),
+			control: a.hotCommentsControl,
+		})
+	}
 	playback := settingsCatDef{id: "playback", label: i18n.T("Playback"), icon: lucide.Volume2(),
-		groups: []settingsGroupDef{{rows: []settingsRowDef{
-			{label: i18n.T("Quality"), sub: i18n.T("What's asked of plugins that have a choice, from the next song on"),
-				control: a.qualityControl},
-			{label: i18n.T("Even Out Loudness"), sub: i18n.T("Adjust each song's volume by what its plugin measured of it, for them to sound as loud as each other"),
-				control: a.normalizeControl},
-		}}}}
+		groups: []settingsGroupDef{{rows: playbackRows}}}
 
 	if a.supportsDesktopLyrics() && !(a.settingsInMain && a.phoneLayout(a.cx)) {
 		playback.groups = append(playback.groups, settingsGroupDef{title: i18n.T("Desktop Lyrics"), rows: a.desktopLyricsRows()})
@@ -636,6 +644,14 @@ func (a *app) normalizeControl(p palette) core.Node {
 		a.set.save()
 		a.bump()
 	}, TestID: "settings-normalize", Label: i18n.T("Even Out Loudness")}
+}
+
+func (a *app) hotCommentsControl(p palette) core.Node {
+	return settingsSwitch{palette: p, Touch: a.settingsInMain && a.phoneLayout(a.cx), Checked: func() bool { return a.set.HotComments }, OnChange: func(on bool) {
+		a.set.HotComments = on
+		a.set.save()
+		a.bump()
+	}, TestID: "settings-hot-comments", Label: i18n.T("Top Comments in Quiet Parts")}
 }
 
 func (a *app) fogControl(p palette) core.Node {

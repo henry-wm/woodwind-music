@@ -55,6 +55,55 @@ func (a *app) nowPlayingView(cx *core.Scope, p palette) core.Node {
 		}, Children: children}
 }
 
+const (
+	npPaneLyrics   = 0
+	npPaneQueue    = 1
+	npPaneWall     = 2
+	npPaneStage    = 3
+	npPaneComments = 4
+	npPaneShow     = 5
+)
+
+type npTab struct {
+	label string
+	index int
+}
+
+func (a *app) npTabs(tr *music.Track) []npTab {
+	var tabs []npTab
+	if tr != nil && tr.ShowID != "" {
+		tabs = []npTab{{i18n.T("About"), npPaneShow}, {i18n.T("Up Next"), npPaneQueue}}
+	} else {
+		tabs = []npTab{{i18n.T("Lyrics"), npPaneLyrics}, {i18n.T("Stage"), npPaneStage}, {i18n.T("Up Next"), npPaneQueue}, {i18n.T("Wall"), npPaneWall}}
+	}
+	if tr != nil && a.trackCan(tr, "comments") {
+		tabs = append(tabs, npTab{i18n.T("Comments"), npPaneComments})
+	}
+	return tabs
+}
+
+func (a *app) normalizeNowPlayingPane(tr *music.Track, current int) int {
+	if tr == nil {
+		return current
+	}
+	if tr.ShowID != "" {
+		if current == npPaneLyrics || current == npPaneStage || current == npPaneWall {
+			return npPaneShow
+		}
+		if current == npPaneComments && !a.trackCan(tr, "comments") {
+			return npPaneShow
+		}
+		return current
+	}
+	if current == npPaneShow {
+		return npPaneLyrics
+	}
+	if current == npPaneComments && !a.trackCan(tr, "comments") {
+		return npPaneLyrics
+	}
+	return current
+}
+
 // nowPlayingBody shares a bounded viewport between the cover and the lyrics.
 // A zero flex basis is essential: a long lyric list must not size the window.
 func (a *app) nowPlayingBody(cx *core.Scope, p palette, white core.Color) core.Node {
@@ -63,14 +112,15 @@ func (a *app) nowPlayingBody(cx *core.Scope, p palette, white core.Color) core.N
 		return core.View{Style: core.Style{FlexGrow: 1, FlexBasis: core.Pt(0), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
 			Children: []core.Node{text(i18n.T("Not Playing"), 22, core.FontWeightBold, core.RGBA(0xffffff, 0.5))}}
 	}
-	paneIdx := a.npPane.Get()
-	if paneIdx != 2 {
+	a.commentsFor(tr)
+	paneIdx := a.normalizeNowPlayingPane(tr, a.npPane.Get())
+	if paneIdx != npPaneWall {
 		a.wall.track = ""
 	}
-	if paneIdx == 3 {
+	if paneIdx == npPaneStage {
 		return a.stageView(cx, p, white)
 	}
-	if paneIdx == 2 {
+	if paneIdx == npPaneWall {
 		return a.wallView(cx, p, white)
 	}
 	size := cx.Env().Window()
@@ -110,6 +160,10 @@ func (a *app) nowPlayingBody(cx *core.Scope, p palette, white core.Color) core.N
 		a.progress(palette{accent: white, press: core.RGBA(0xffffff, 0.18)}, true),
 		core.View{Style: core.Style{Height: core.Pt(16), Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifySpaceBetween}, Children: []core.Node{
 			core.Text{ContentFunc: func() string { a.tick.Get(); return clock(a.pl.Position()) }, Style: core.Style{FontSize: 11, Color: core.RGBA(0xffffff, 0.5)}},
+			core.Show{When: func() bool { a.playRev.Get(); a.tick.Get(); return isLosslessStream(a.pl.Stream()) }, Then: func(*core.Scope) core.Node {
+				return core.View{TestID: "np-lossless", Style: core.Style{Padding: core.Symmetric(1, 6), CornerRadius: 4, BorderWidth: 1, BorderColor: core.RGBA(0xf5d58a, 0.55)},
+					Children: []core.Node{core.Text{Content: i18n.T("Lossless"), Style: core.Style{FontSize: 9.5, FontWeight: core.FontWeight(800), LetterSpacing: 0.6, Color: core.RGB(0xf5d58a)}}}}
+			}},
 			core.Text{ContentFunc: func() string {
 				a.tick.Get()
 				if a.pl.Loading() {
@@ -121,7 +175,7 @@ func (a *app) nowPlayingBody(cx *core.Scope, p palette, white core.Color) core.N
 		core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Margin: core.Edges{Top: 14, Bottom: 18}},
 			Children: a.transport(palette{text: white, hover: core.RGBA(0xffffff, 0.10), press: core.RGBA(0xffffff, 0.16)},
 				core.RGBA(0xffffff, 0.45), 28)},
-		core.View{TestID: "np-volume", Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 8}, Children: []core.Node{
+		core.View{TestID: "np-volume", OnWheel: a.adjustVolumeByWheel, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 8}, Children: []core.Node{
 			a.playbackSpeedButton("np-speed", core.RGBA(0xffffff, 0.65), 26),
 			icon(lucideVolume, 14, core.RGBA(0xffffff, 0.55)),
 			base.Slider{Value: func() base.SliderValue { a.tick.Get(); return base.SingleValue(a.pl.Volume() * 100) },
@@ -135,11 +189,15 @@ func (a *app) nowPlayingBody(cx *core.Scope, p palette, white core.Color) core.N
 	}}
 	pane := core.View{TestID: "np-pane", Style: core.Style{FlexGrow: 1, FlexShrink: 1, FlexBasis: core.Pt(0), MinWidth: core.Pt(0), MinHeight: core.Pt(0), Direction: core.Column},
 		Children: []core.Node{core.Dynamic(func(cx *core.Scope) core.Node {
-			a.npPane.Get()
-			switch a.npPane.GetUntracked() {
-			case 1:
+			idx := a.normalizeNowPlayingPane(tr, a.npPane.Get())
+			switch idx {
+			case npPaneQueue:
 				a.modeRev.Get()
 				return a.queuePane(cx, white)
+			case npPaneComments:
+				return a.commentsPane(cx, p, tr, white)
+			case npPaneShow:
+				return a.showPane(tr, white)
 			default:
 				return a.lyricsPane(cx, white)
 			}
@@ -176,23 +234,35 @@ func (a *app) npLikeButton(p palette, tr music.Track, size core.Points, style co
 
 // paneTabs are the tabs of Now Playing.
 func (a *app) paneTabs(_ *core.Scope, white core.Color) core.Node {
-	tabs := []struct {
-		label string
-		index int
-	}{{i18n.T("Lyrics"), 0}, {i18n.T("Stage"), 3}, {i18n.T("Up Next"), 1}, {i18n.T("Wall"), 2}}
+	tr := a.pl.Current()
+	active := a.normalizeNowPlayingPane(tr, a.npPane.Get())
+	tabs := a.npTabs(tr)
 	var buttons []core.Node
 	for _, t := range tabs {
 		index := t.index
-		selected := a.npPane.Get() == index
+		label := t.label
+		selected := active == index
 		bg := core.Color(0)
 		fg := core.RGBA(0xffffff, 0.55)
 		if selected {
 			bg, fg = core.RGBA(0xffffff, 0.14), white
 		}
-		buttons = append(buttons, base.Button{Label: t.label, TestID: fmt.Sprintf("np-tab-%d", index), OnPress: func(core.PressEvent) { a.npPane.Set(index) },
+		var child core.Node = text(label, 13, core.FontWeightSemibold, fg)
+		if index == npPaneComments {
+			child = core.Text{ContentFunc: func() string {
+				if a.commentRev != nil {
+					a.commentRev.Get()
+				}
+				if a.npComments.loaded && a.npComments.total > 0 {
+					return label + " " + i18n.Count(a.npComments.total)
+				}
+				return label
+			}, Style: core.Style{FontSize: 13, FontWeight: core.FontWeightSemibold, FontVariant: core.FontTabularNums, Color: fg}}
+		}
+		buttons = append(buttons, base.Button{Label: label, TestID: fmt.Sprintf("np-tab-%d", index), OnPress: func(core.PressEvent) { a.npPane.Set(index) },
 			Style: core.Style{Padding: core.Symmetric(6, 14), CornerRadius: 999, Background: bg,
 				Hover: &core.Style{Background: core.RGBA(0xffffff, 0.08)}},
-			Children: []core.Node{text(t.label, 13, core.FontWeightSemibold, fg)}})
+			Children: []core.Node{child}})
 	}
 	return core.View{Style: core.Style{Direction: core.Row, Gap: 6}, Children: buttons}
 }

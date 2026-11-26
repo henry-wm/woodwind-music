@@ -68,7 +68,7 @@ func (a *app) coverTint(url string) core.Color {
 // dominantColor is a cover's most vivid color, weighted by how saturated and
 // bright it is, as MyGo finds it: a gray cover's average.
 func dominantColor(data []byte) core.Color {
-	img, _, err := image.Decode(bytes.NewReader(data))
+	img, _, err := image.Decode(bytes.NewReader(music.StillCover(data)))
 	if err != nil {
 		return 0
 	}
@@ -195,7 +195,8 @@ func (a *app) sourceImage(im core.Image) core.Node {
 		go func() {
 			data, err := music.Fetch(address)
 			if err == nil {
-				a.post(func() { source.Set(&core.ImageSource{Data: data}) })
+				still := music.StillCover(data)
+				a.post(func() { source.Set(&core.ImageSource{Data: still}) })
 			}
 		}()
 	}

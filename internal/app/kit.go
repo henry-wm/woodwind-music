@@ -68,8 +68,10 @@ var (
 	lucideListChecks   = lucide.ListChecks()
 	lucideSquare       = lucide.Square()
 	lucideSquareCheck  = lucide.SquareCheck()
-	lucidePin          = lucide.Pin()
-	lucideRotateCcw    = lucide.RotateCcw()
+	lucidePin           = lucide.Pin()
+	lucideRotateCcw     = lucide.RotateCcw()
+	lucideMessageCircle = lucide.MessageCircle()
+	lucideThumbsUp      = lucide.ThumbsUp()
 )
 
 func (a *app) palette(cx *core.Scope) palette {

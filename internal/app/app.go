@@ -105,6 +105,9 @@ type settings struct {
 	SearchHistory []string `json:"searchHistory,omitempty"`
 	// LyricsStage shows lyrics on the stage rather than scrolling.
 	LyricsStage bool `json:"lyricsStage"`
+	// HotComments shows a song's top comments in its quiet parts, in place of
+	// the lyrics, for sources with comments.
+	HotComments bool `json:"hotComments"`
 	// Fog fills Now Playing's backdrop with drifting fog of the cover's colors.
 	Fog bool `json:"fog"`
 	// AppIcon is where the app's icon shows on macOS (appIcons).
@@ -259,8 +262,13 @@ type app struct {
 	tick         *core.Signal[int]
 	query        *core.Signal[string]
 	searchOpen   *core.Signal[bool]
+	suggestRev   *core.Signal[int]
+	suggestions  suggestState
 	np           *core.Signal[bool]
 	npPane       *core.Signal[int]
+	commentRev   *core.Signal[int]
+	npComments   npCommentState
+	quiet        quietState
 	stageTick    *core.Signal[int]
 	toast        *core.Signal[string]
 
@@ -373,8 +381,10 @@ func newApp(cx *core.Scope) *app {
 		tick:             core.NewSignal(cx, 0),
 		query:            core.NewSignal(cx, ""),
 		searchOpen:       core.NewSignal(cx, false),
+		suggestRev:       core.NewSignal(cx, 0),
 		np:               core.NewSignal(cx, false),
 		npPane:           core.NewSignal(cx, 0),
+		commentRev:       core.NewSignal(cx, 0),
 		stageTick:        core.NewSignal(cx, 0),
 		toast:            core.NewSignal(cx, ""),
 		phoneSheet:       core.NewSignal(cx, ""),
@@ -514,6 +524,7 @@ func (a *app) close() {
 		a.pluginCheckTimer.Stop()
 		a.pluginCheckTimer = nil
 	}
+	a.dismissSuggestions()
 	a.closePlugins()
 }
 
@@ -1008,6 +1019,13 @@ func (a *app) toggleLike(id string) {
 	a.toggleTrackLike(music.Track{ID: id, Source: a.source().Info().ID})
 }
 
+// likeCurrent likes or unlikes the track currently playing.
+func (a *app) likeCurrent() {
+	if tr := a.pl.Current(); tr != nil {
+		a.toggleTrackLike(*tr)
+	}
+}
+
 func (a *app) isTrackLiked(tr music.Track) bool {
 	if tr.Source == "" || tr.Source == a.source().Info().ID {
 		return a.likedSet[tr.ID]
@@ -1227,6 +1245,7 @@ func (a *app) removeFolder(path string) {
 }
 
 func (a *app) search(q string) {
+	a.dismissSuggestions()
 	q = strings.TrimSpace(q)
 	if q == "" {
 		a.query.Set("")
@@ -1264,6 +1283,7 @@ func (a *app) rememberSearch(q string) {
 }
 
 func (a *app) closeSearch() {
+	a.dismissSuggestions()
 	a.query.Set("")
 	a.searchOpen.Set(false)
 	if a.route.GetUntracked().page == pageSearch {
@@ -1493,6 +1513,7 @@ func (a *app) shortcuts(cx *core.Scope) {
 	cx.OnKey("mod+[", a.back)
 	cx.OnKey("mod+]", a.goForward)
 	cx.OnKey("mod+n", a.newPlaylist)
+	cx.OnKey("mod+d", a.likeCurrent)
 	cx.OnKey("mod+,", a.openSettings)
 	if a.supportsDesktopLyrics() {
 		cx.OnKey("mod+shift+l", a.toggleDesktopLyrics)
@@ -1526,11 +1547,15 @@ func (a *app) shortcuts(cx *core.Scope) {
 		}
 		return false
 	})
-	for i, pane := range []int{0, 3, 1, 2} {
-		pane := pane
+	for i := range 5 {
+		idx := i
 		cx.OnKey(fmt.Sprintf("mod+%d", i+1), func() {
-			if a.nowPlaying {
-				a.npPane.Set(pane)
+			if !a.nowPlaying {
+				return
+			}
+			tabs := a.npTabs(a.pl.Current())
+			if idx < len(tabs) {
+				a.npPane.Set(tabs[idx].index)
 			}
 		})
 	}

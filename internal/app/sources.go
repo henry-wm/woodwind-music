@@ -174,6 +174,7 @@ func (a *app) activateSource(id string) {
 	a.searches = map[route]*searchData{}
 	a.extra = map[route]*extraData{}
 	a.lastSearch = route{}
+	a.dismissSuggestions()
 	a.query.Set("")
 	a.searchOpen.Set(false)
 	a.scroll = map[string]core.Points{}

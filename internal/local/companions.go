@@ -316,6 +316,7 @@ func companionImage(b []byte) []byte {
 	if len(b) > 8<<20 {
 		return nil
 	}
+	b = music.StillCover(b)
 	config, _, err := image.DecodeConfig(bytes.NewReader(b))
 	if err != nil || config.Width <= 0 || config.Height <= 0 || max(config.Width, config.Height) > 4096 {
 		return nil

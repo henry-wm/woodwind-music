@@ -9,6 +9,7 @@ import (
 
 	"github.com/HengWh/woodwind-music/internal/i18n"
 	"github.com/HengWh/woodwind-music/internal/lyrics"
+	"github.com/HengWh/woodwind-music/internal/music"
 )
 
 // lyricsPane centers the sung line on phones. Browsing the lyrics
@@ -25,12 +26,17 @@ func (a *app) lyricsPane(cx *core.Scope, white core.Color) core.Node {
 			MinHeight: core.Pt(0), Gap: 30, Padding: core.Edges{Top: 24, Left: 12, Right: 12}}, Children: rows}
 	}
 	if len(lines) == 0 {
-		return core.View{TestID: "lyrics-empty", Style: core.Style{FlexGrow: 1, FlexBasis: core.Pt(0), MinHeight: core.Pt(0),
+		empty := core.View{TestID: "lyrics-empty", Style: core.Style{FlexGrow: 1, FlexBasis: core.Pt(0), MinHeight: core.Pt(0),
 			AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
 			Children: []core.Node{text(i18n.T("No lyrics. Enjoy the music."), a.headingSize(24, phoneFontSection), a.headingWeight(), core.RGBA(0xffffff, 0.4))}}
+		if a.phoneLayout(cx) {
+			return empty
+		}
+		return a.withQuietComment(cx, empty, lines, loaded)
 	}
 	list := new(core.Ref)
 	phone := a.phoneLayout(cx)
+	lang := lyrics.Lang(lines)
 	anchor := float32(0.30)
 	if phone {
 		anchor = 0.5
@@ -118,7 +124,7 @@ func (a *app) lyricsPane(cx *core.Scope, white core.Color) core.Node {
 	mask := core.LinearGradient(180, white, white)
 	mask.Stops = []core.ColorStop{{Color: core.Transparent, At: core.Pct(0)}, {Color: white, At: core.Pt(18)},
 		{Color: white, At: core.Pct(90)}, {Color: core.Transparent, At: core.Pct(100)}}
-	return core.List{Ref: list, TestID: "lyrics-list", Count: func() int { return len(lines) }, Key: func(i int) any { return i },
+	listNode := core.List{Ref: list, TestID: "lyrics-list", Count: func() int { return len(lines) }, Key: func(i int) any { return i },
 		EstimatedSize: 70, Gap: 6, HideIndicator: true,
 		Style: core.Style{FlexGrow: 1, FlexShrink: 1, FlexBasis: core.Pt(0), MinHeight: core.Pt(0), Mask: &mask},
 		OnLayout: func(b core.Bounds) {
@@ -149,16 +155,54 @@ func (a *app) lyricsPane(cx *core.Scope, white core.Color) core.Node {
 			// with that line, rather than retaining the first index it displayed.
 			return core.Dynamic(func(cx *core.Scope) core.Node {
 				i := row.Index()
-				return a.lyricLine(cx, lines[i], i, current, frame, func() {
+				return a.lyricLine(cx, lines[i], i, lang, current, frame, func() {
 					a.pl.Seek(lines[i].At)
 					resume()
 					a.heartbeat()
 				})
 			})
 		}}
+	if phone {
+		return listNode
+	}
+	return a.withQuietComment(cx, listNode, lines, loaded)
 }
 
-func (a *app) lyricLine(cx *core.Scope, line lyrics.Line, index int, current *core.Memo[int], frame *core.Signal[int], seek func()) core.Node {
+func (a *app) withQuietComment(cx *core.Scope, under core.Node, lines []lyrics.Line, loaded bool) core.Node {
+	active := core.NewMemo(cx, func() *music.Comment {
+		a.tick.Get()
+		a.rev.Get()
+		if a.commentRev != nil {
+			a.commentRev.Get()
+		}
+		return a.quietComment(a.pl.Current(), lines, loaded, a.pl.Position())
+	})
+	return core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, FlexBasis: core.Pt(0), MinHeight: core.Pt(0), Direction: core.Column}, Children: []core.Node{
+		core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, FlexBasis: core.Pt(0), MinHeight: core.Pt(0), Direction: core.Column}, StyleFunc: func() core.Style {
+			alpha := float32(1)
+			if active.Get() != nil {
+				alpha = 0.08
+			}
+			duration := 400 * time.Millisecond
+			if cx.Env().ReduceMotion() {
+				duration = 0
+			}
+			return core.Style{Opacity: core.Alpha(alpha), Transition: core.Transition{Duration: duration, Properties: core.TransitionOpacity}}
+		}, Children: []core.Node{under}},
+		core.Dynamic(func(*core.Scope) core.Node {
+			cm := active.Get()
+			if cm == nil {
+				return core.Group{}
+			}
+			return core.View{Style: core.Style{Position: core.Absolute, Top: core.Pt(0), Left: core.Pt(0), Right: core.Pt(16), Bottom: core.Pt(0),
+				Direction: core.Column, JustifyContent: core.JustifyCenter}, Children: []core.Node{
+				a.hotCommentCard(cm, 22, 0, func() { a.npPane.Set(npPaneComments) }),
+			}}
+		}),
+	}}
+}
+
+func (a *app) lyricLine(cx *core.Scope, line lyrics.Line, index int, lang string, current *core.Memo[int], frame *core.Signal[int], seek func()) core.Node {
 	fontSize, translationSize := core.Points(30), core.Points(17)
 	if a.phoneLayout(cx) {
 		fontSize, translationSize = phoneFontLyrics, phoneFontTranslation
@@ -221,7 +265,7 @@ func (a *app) lyricLine(cx *core.Scope, line lyrics.Line, index int, current *co
 						spans[i] = core.Span{Content: w.Text, Style: core.Style{Color: core.RGBA(0xffffff, float32(0.38+0.62*lit))}}
 					}
 					return spans
-				}, Style: core.Style{Width: core.Pct(100), TextAlign: textAlign, FontSize: fontSize, FontWeight: weight, LineHeightMultiple: lineHeight, LetterSpacing: spacing, Color: core.RGB(0xffffff)}},
+				}, Style: core.Style{Width: core.Pct(100), TextAlign: textAlign, Language: lang, FontSize: fontSize, FontWeight: weight, LineHeightMultiple: lineHeight, LetterSpacing: spacing, Color: core.RGB(0xffffff)}},
 				core.Show{When: func() bool { return line.Translation != "" }, Then: func(*core.Scope) core.Node {
 					return core.Text{Content: line.Translation, Style: core.Style{Width: core.Pct(100), TextAlign: textAlign, FontSize: translationSize, FontWeight: translationWeight,
 						Color: core.RGBA(0xffffff, 0.7), LineHeightMultiple: 1.4}}

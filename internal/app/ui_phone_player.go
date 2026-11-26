@@ -170,7 +170,7 @@ func (a *app) phoneNowPlaying(cx *core.Scope, p palette) core.Node {
 							}
 							if stream := a.pl.Stream(); stream != nil {
 								label := strings.ToUpper(stream.Type)
-								if stream.Quality == "lossless" {
+								if isLosslessStream(stream) {
 									label = i18n.T("Lossless") + " · " + label
 								}
 								return label

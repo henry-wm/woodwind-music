@@ -150,6 +150,7 @@ func coverImage(b []byte) ([]byte, error) {
 	if len(b) > 8<<20 {
 		return nil, errors.New("cover image is too large")
 	}
+	b = music.StillCover(b)
 	config, _, err := image.DecodeConfig(bytes.NewReader(b))
 	if err != nil {
 		return nil, err

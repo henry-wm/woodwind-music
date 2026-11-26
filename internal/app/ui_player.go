@@ -55,12 +55,15 @@ func (a *app) playerBar(cx *core.Scope, p palette) core.Node {
 		right = append(right, a.desktopLyricsButton(p))
 		rightWidth += 36
 	}
-	right = append(right, base.Button{Label: i18n.T("Volume"), TestID: "volume-icon", OnPress: func(core.PressEvent) {
-		a.mute()
-	}, Style: core.Style{Width: core.Pt(24), Height: core.Pt(24), Direction: core.Row, AlignItems: core.AlignCenter,
-		JustifyContent: core.JustifyCenter, CornerRadius: 6, Hover: &core.Style{Background: p.hover}},
-		Children: []core.Node{icon(lucideVolume, 16, p.muted)}})
-	right = append(right, a.volumeSlider(p, volumeWidth))
+	right = append(right, core.View{TestID: "bar-volume-wrap", OnWheel: a.adjustVolumeByWheel,
+		Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6}, Children: []core.Node{
+			base.Button{Label: i18n.T("Volume"), TestID: "volume-icon", OnPress: func(core.PressEvent) {
+				a.mute()
+			}, Style: core.Style{Width: core.Pt(24), Height: core.Pt(24), Direction: core.Row, AlignItems: core.AlignCenter,
+				JustifyContent: core.JustifyCenter, CornerRadius: 6, Hover: &core.Style{Background: p.hover}},
+				Children: []core.Node{icon(lucideVolume, 16, p.muted)}},
+			a.volumeSlider(p, volumeWidth),
+		}})
 	return core.View{TestID: "player-bar", Style: core.Style{Height: core.Pt(playerBarHeight), FlexShrink: 0, Direction: core.Row, AlignItems: core.AlignCenter,
 		Padding: core.Symmetric(0, 18), Gap: 16, Background: p.bg, Borders: core.Edges{Top: 1},
 		BorderColor: p.hairline}, Children: []core.Node{
@@ -247,4 +250,44 @@ func (a *app) volumeSlider(p palette, width core.Points) core.Node {
 		RangeStyle: core.Style{Height: core.Pt(4), CornerRadius: 2, Background: p.muted},
 		ThumbStyle: core.Style{Width: core.Pt(8), Height: core.Pt(8), CornerRadius: 4, Background: p.text},
 	}
+}
+
+// wheelVolumeStep is how much one mouse-wheel notch changes volume.
+const wheelVolumeStep = 0.03
+
+func volumeWheelDelta(ev core.WheelEvent) float64 {
+	if ev.Touchpad {
+		return float64(ev.Delta.Y) / 400
+	}
+	switch {
+	case ev.Delta.Y > 0:
+		return wheelVolumeStep
+	case ev.Delta.Y < 0:
+		return -wheelVolumeStep
+	}
+	return 0
+}
+
+// adjustVolumeByWheel adjusts volume by a fixed step per mouse-wheel notch,
+// or proportionally for precise touchpad scrolling.
+func (a *app) adjustVolumeByWheel(ev core.WheelEvent) {
+	delta := volumeWheelDelta(ev)
+	if delta == 0 {
+		return
+	}
+	next := min(1, max(0, a.pl.Volume()+delta))
+	if next == a.set.Volume && next == a.pl.Volume() {
+		return
+	}
+	a.set.Volume = next
+	a.pl.SetVolume(next)
+	a.set.save()
+	a.tick.Update(func(n int) int { return n + 1 })
+}
+
+func isLosslessStream(st *music.Stream) bool {
+	if st == nil {
+		return false
+	}
+	return st.Quality == "lossless" || st.Type == "flac" || st.Type == "wav" || st.Type == "alac"
 }

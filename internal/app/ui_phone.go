@@ -97,13 +97,13 @@ func (a *app) phoneHeader(cx *core.Scope, p palette) core.Node {
 				case pagePlaylist:
 					title = i18n.T("Playlist")
 				case pageLiked:
-					title = i18n.T("Liked Songs")
+					title = a.builtinTitle("liked", "Liked Songs")
 				case pageShows:
-					title = i18n.T("Podcasts")
+					title = a.builtinTitle("shows", "Podcasts")
 				case pageComments:
 					title = i18n.T("Comments")
 				case pageSavedAlbums:
-					title = i18n.T("Saved Albums")
+					title = a.builtinTitle("savedAlbums", "Saved Albums")
 				case pageStations:
 					title = a.stationsTitle()
 				case pageBrowse:
@@ -169,9 +169,9 @@ func (s phoneSearchBox) Render(cx *core.Scope) core.Node {
 			icon(lucideSearch, 21, p.muted),
 			core.Input{Ref: a.searchRef, TestID: "search-input", Label: i18n.T("Search"), Placeholder: i18n.T("Songs, artists, albums"), Value: a.query.Get,
 				NoAutoCorrect: true, ReturnKeyType: core.ReturnKeySearch, SubmitBehavior: core.SubmitBehaviorSubmit,
-				OnFocus: func() { focused.Set(true); a.searchOpen.Set(true) }, OnBlur: func() { focused.Set(false); close() },
+				OnFocus: func() { focused.Set(true); a.searchOpen.Set(true); a.requestSuggestions(a.query.GetUntracked()) }, OnBlur: func() { focused.Set(false); close(); a.dismissSuggestions() },
 				OnCompositionChange: func(c core.Composition) { composing.Set(c.Composing) },
-				OnChange:            func(q string) { a.query.Set(q); a.searchOpen.Set(true) }, OnSubmit: submit,
+				OnChange:            func(q string) { a.query.Set(q); a.searchOpen.Set(true); a.requestSuggestions(q) }, OnSubmit: submit,
 				Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Height: core.Pt(48), FontSize: phoneFontBody, Color: p.text, PlaceholderColor: p.muted, Background: core.Color(0)}},
 			a.phoneIcon(p, "clear-search", i18n.T("Clear Search"), lucideX, p.muted, func() { a.query.Set(""); a.open(route{page: pageSearch}); a.searchRef.Focus(); a.searchOpen.Set(true) }),
 		}},
@@ -183,7 +183,7 @@ func (s phoneSearchBox) Render(cx *core.Scope) core.Node {
 				Children: []core.Node{core.Dynamic(func(*core.Scope) core.Node {
 					var rows []core.Node
 					for i, item := range a.searchSuggestions() {
-						if i >= 6 {
+						if i >= 10 {
 							break
 						}
 						suggestion := item
