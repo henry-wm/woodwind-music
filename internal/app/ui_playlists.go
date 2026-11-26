@@ -16,7 +16,6 @@ import (
 )
 
 type playlistsUI struct {
-	query *core.Signal[string]
 	scope string // "", "mine", "saved"
 	sort  string // "", "name", "tracks"
 	view  string // "", "list"
@@ -24,23 +23,13 @@ type playlistsUI struct {
 
 func (u *playlistsUI) reset() {
 	u.scope, u.sort = "", ""
-	if u.query != nil {
-		u.query.Set("")
-	}
 }
 
 func (u *playlistsUI) hasActiveFilters() bool {
-	q := ""
-	if u.query != nil {
-		q = strings.TrimSpace(u.query.Get())
-	}
-	return q != "" || u.scope != "" || u.sort != ""
+	return u.scope != "" || u.sort != ""
 }
 
 func (a *app) playlistsPage(cx *core.Scope, p palette) core.Node {
-	if a.playlistsUI.query == nil {
-		a.playlistsUI.query = core.NewSignal(a.cx, "")
-	}
 	return playlistsScreen{a: a, p: p}
 }
 
@@ -51,28 +40,21 @@ type playlistsScreen struct {
 
 func (s playlistsScreen) Render(cx *core.Scope) core.Node {
 	a, p := s.a, s.p
-	searchRef := new(core.Ref)
 	return core.View{TestID: "playlists-page", Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0), Direction: core.Column}, Children: []core.Node{
 		core.View{Style: core.Style{FlexShrink: 0, Direction: core.Column, Gap: 12,
 			Padding: core.Edges{Top: 14, Right: pagePad + 4, Bottom: 12, Left: pagePad + 4},
 			Borders: core.Edges{Bottom: 1}, BorderColor: p.hairline}, Children: []core.Node{
 			core.Dynamic(func(cx *core.Scope) core.Node {
 				a.rev.Get()
-				a.playlistsUI.query.Get()
 				return a.playlistsDesktopHeader(p)
 			}),
-			core.View{TestID: "playlists-filter-bar", Style: core.Style{Direction: core.Row, Wrap: core.Wrap, AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{
-				a.playlistsSearchField(p, searchRef),
-				core.Dynamic(func(cx *core.Scope) core.Node {
-					a.rev.Get()
-					a.playlistsUI.query.Get()
-					return a.playlistsDesktopConditions(p)
-				}),
-			}},
+			core.Dynamic(func(cx *core.Scope) core.Node {
+				a.rev.Get()
+				return a.playlistsFilterBar(p)
+			}),
 		}},
 		core.Dynamic(func(cx *core.Scope) core.Node {
 			a.rev.Get()
-			a.playlistsUI.query.Get()
 			return a.playlistsBody(cx, p)
 		}),
 	}}
@@ -91,10 +73,6 @@ func (a *app) splitPlaylists() (mineCount, savedCount int) {
 
 func (a *app) filteredPlaylists() []music.Playlist {
 	u := &a.playlistsUI
-	q := ""
-	if u.query != nil {
-		q = strings.ToLower(strings.TrimSpace(u.query.Get()))
-	}
 	out := make([]music.Playlist, 0, len(a.mine))
 	for _, pl := range a.mine {
 		if u.scope == "mine" && !pl.Mine {
@@ -102,12 +80,6 @@ func (a *app) filteredPlaylists() []music.Playlist {
 		}
 		if u.scope == "saved" && pl.Mine {
 			continue
-		}
-		if q != "" {
-			haystack := strings.ToLower(pl.Name + " " + pl.Owner + " " + pl.Description)
-			if !strings.Contains(haystack, q) {
-				continue
-			}
 		}
 		out = append(out, pl)
 	}
@@ -144,55 +116,15 @@ func (a *app) playlistsSummaryText(filteredCount int) string {
 
 func (a *app) playlistsDesktopHeader(p palette) core.Node {
 	filtered := a.filteredPlaylists()
-	heading := []core.Node{
+	return core.View{TestID: "playlists-header", Style: core.Style{Direction: core.Column, Gap: 4}, Children: []core.Node{
 		core.Text{TestID: "playlists-summary", Content: a.playlistsSummaryText(len(filtered)),
 			Style: core.Style{FontSize: 12, FontWeight: core.FontWeightSemibold, LetterSpacing: 0.4, Color: p.muted}},
 		core.Text{Content: i18n.T("Playlists"),
 			Style: core.Style{FontSize: 30, FontWeight: core.FontWeightBold, LetterSpacing: -0.6, Color: p.text}},
-	}
-	var actions []core.Node
-	if a.can("createPlaylist") {
-		actions = append(actions, a.storedPillButton(p, "new-playlist", lucidePlus, i18n.T("New Playlist"), true, false, false, a.newPlaylist))
-	}
-	if a.source() != a.local {
-		actions = append(actions, a.storedPillButton(p, "playlists-refresh", lucideRefreshCw, i18n.T("Refresh"), false, false, a.playlistsBusy, a.reload))
-	}
-	return core.View{TestID: "playlists-header", Style: core.Style{Direction: core.Row, Wrap: core.Wrap, AlignItems: core.AlignEnd, JustifyContent: core.JustifySpaceBetween, Gap: 12}, Children: []core.Node{
-		core.View{Style: core.Style{FlexShrink: 1, MinWidth: core.Pt(0), Gap: 4}, Children: heading},
-		core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, AlignItems: core.AlignCenter, Gap: 8}, Children: actions},
 	}}
 }
 
-func (a *app) playlistsSearchField(p palette, ref *core.Ref) core.Node {
-	boxStyle := core.Style{
-		Width: core.Pt(220), Height: core.Pt(32), FlexShrink: 0,
-		Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6,
-		Padding: core.Symmetric(0, 8), CornerRadius: 8, Background: p.hover,
-		BorderWidth: 1, BorderColor: p.hairline,
-		FocusWithin: &core.Style{Background: p.bg, BorderColor: p.accent, OutlineWidth: 3, OutlineColor: ui.Alpha(p.accent, 0.25)},
-	}
-	return core.View{TestID: "playlists-search-box", OnPress: func(core.PressEvent) { ref.Focus() }, Style: boxStyle, Children: []core.Node{
-		icon(lucideSearch, 13.5, p.muted),
-		core.Input{
-			Ref: ref, TestID: "playlists-search",
-			Label: i18n.T("Search playlists"), Placeholder: i18n.T("Search playlists"),
-			Value: a.playlistsUI.query.Get, NoAutoCorrect: true,
-			OnChange: func(v string) { a.playlistsUI.query.Set(v) },
-			Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Height: core.Pt(24),
-				Background: core.Color(0), Color: p.text, PlaceholderColor: p.faint, FontSize: 12.5,
-				BorderWidth: 0, OutlineWidth: 0},
-		},
-		core.Show{When: func() bool { return a.playlistsUI.query.Get() != "" }, Then: func(*core.Scope) core.Node {
-			return base.Button{TestID: "playlists-search-clear", Label: i18n.T("Clear Search"), NoFocus: true,
-				OnPress: func(core.PressEvent) { a.playlistsUI.query.Set("") },
-				Style: core.Style{Width: core.Pt(18), Height: core.Pt(18), FlexShrink: 0, Direction: core.Row,
-					AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, CornerRadius: 9, Background: p.faint},
-				Children: []core.Node{icon(lucideX, 10, p.bg)}}
-		}},
-	}}
-}
-
-func (a *app) playlistsDesktopConditions(p palette) core.Node {
+func (a *app) playlistsFilterBar(p palette) core.Node {
 	u := &a.playlistsUI
 	var segments []core.Node
 	for _, it := range []struct{ id, value, label string }{
@@ -242,7 +174,7 @@ func (a *app) playlistsDesktopConditions(p palette) core.Node {
 			viewBtn("playlists-view-list", "list", i18n.T("List View"), lucideListRows),
 		}}
 
-	nodes := []core.Node{
+	left := []core.Node{
 		scopeBar,
 		a.playlistsSortSelect(p, []ui.Option[string]{
 			{Value: "", Label: i18n.T("Default Order")},
@@ -252,14 +184,32 @@ func (a *app) playlistsDesktopConditions(p palette) core.Node {
 		viewBar,
 	}
 	if u.hasActiveFilters() {
-		nodes = append(nodes, base.Button{TestID: "playlists-filter-reset", Label: i18n.T("Reset"),
+		left = append(left, base.Button{TestID: "playlists-filter-reset", Label: i18n.T("Reset"),
 			OnPress: func(core.PressEvent) { u.reset(); a.bump() },
 			Style: core.Style{Height: core.Pt(32), Padding: core.Symmetric(0, 10), Gap: 5, Direction: core.Row,
 				AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, CornerRadius: 8,
 				Hover: &core.Style{Background: p.hover}},
 			Children: []core.Node{icon(lucideRotateCcw, 13, p.muted), text(i18n.T("Reset"), 12.5, core.FontWeightMedium, p.muted)}})
 	}
-	return core.Group(nodes)
+
+	children := []core.Node{
+		core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, AlignItems: core.AlignCenter, Gap: 8}, Children: left},
+	}
+	if a.can("createPlaylist") {
+		children = append(children, base.Button{
+			TestID: "new-playlist", Label: i18n.T("New Playlist"),
+			OnPress: func(core.PressEvent) { a.newPlaylist() },
+			Style: core.Style{Height: core.Pt(32), FlexShrink: 0, Padding: core.Symmetric(0, 14), Gap: 6,
+				Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+				CornerRadius: 999, Background: p.accent, Color: p.onAccent,
+				Hover: &core.Style{Background: blend(p.accent, core.RGB(0xffffff), 0.12)}},
+			Children: []core.Node{
+				icon(lucidePlus, 14, p.onAccent),
+				text(i18n.T("New Playlist"), 12.5, core.FontWeightMedium, p.onAccent),
+			},
+		})
+	}
+	return core.View{TestID: "playlists-filter-bar", Style: core.Style{Direction: core.Row, Wrap: core.Wrap, AlignItems: core.AlignCenter, JustifyContent: core.JustifySpaceBetween, Gap: 8}, Children: children}
 }
 
 func (a *app) playlistsSortSelect(p palette, options []ui.Option[string]) core.Node {
@@ -300,10 +250,10 @@ func (a *app) playlistsSortSelect(p palette, options []ui.Option[string]) core.N
 			}
 		},
 		RootStyle: core.Style{FlexShrink: 0},
-		Style: core.Style{Height: core.Pt(32), BorderWidth: 1, BorderColor: border, CornerRadius: 8,
+		Style: core.Style{Height: core.Pt(32), JustifyContent: core.JustifyCenter, BorderWidth: 1, BorderColor: border, CornerRadius: 8,
 			Background: bg, Hover: &core.Style{Background: p.press},
 			FocusVisible: &core.Style{OutlineWidth: 3, OutlineColor: ui.Alpha(p.accent, .25)}},
-		Trigger: core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter,
+		Trigger: core.View{Style: core.Style{FlexGrow: 1, Direction: core.Row, AlignItems: core.AlignCenter,
 			Padding: core.Symmetric(0, 10), Gap: 6}, Children: []core.Node{
 			core.Text{Content: options[chosen].Label, MaxLines: 1, Style: core.Style{FontSize: 12.5, FontWeight: core.FontWeightMedium, Color: fg}},
 			icon(lucideChevronDown, 11, fg),
@@ -311,7 +261,7 @@ func (a *app) playlistsSortSelect(p palette, options []ui.Option[string]) core.N
 		PopupStyle: core.Style{MinWidth: core.Pt(150), Background: p.sidebar, BorderWidth: 1, BorderColor: p.hairline,
 			CornerRadius: 10, Padding: core.All(4), ShadowColor: p.cardShade, ShadowRadius: 16, ShadowOffset: core.Point{Y: 6}},
 		ListStyle: core.Style{MaxHeight: core.Pt(240)}, Margin: 8,
-		ItemStyle: core.Style{MinHeight: core.Pt(30), Padding: core.Symmetric(4, 8), CornerRadius: 6,
+		ItemStyle: core.Style{MinHeight: core.Pt(30), JustifyContent: core.JustifyCenter, Padding: core.Symmetric(4, 8), CornerRadius: 6,
 			Focus: &core.Style{Background: p.accent, Color: p.onAccent}, Color: p.text},
 		RenderItem: func(e base.SelectEntry) core.Node {
 			checked := e.Index == chosen
@@ -366,7 +316,7 @@ func (a *app) playlistsBody(cx *core.Scope, p palette) core.Node {
 	if len(filtered) == 0 {
 		body = append(body, core.View{Style: core.Style{AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Padding: core.Symmetric(64, 24), Gap: 10}, Children: []core.Node{
 			text(i18n.T("No matching playlists"), 17, core.FontWeightSemibold, p.text),
-			core.Text{Content: i18n.T("Try a different keyword or filter."), Style: core.Style{FontSize: 13, Color: p.muted}},
+			core.Text{Content: i18n.T("Try a different filter."), Style: core.Style{FontSize: 13, Color: p.muted}},
 			a.storedPillButton(p, "playlists-empty-reset", lucideRotateCcw, i18n.T("Reset"), false, false, false, func() { a.playlistsUI.reset(); a.bump() }),
 		}})
 	} else if a.playlistsUI.view == "list" {

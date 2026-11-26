@@ -114,6 +114,23 @@ func TestDesktopPlaylistsPageFeatures(t *testing.T) {
 	if !ui.Exists("id:playlist-walks") || !ui.Exists("id:playlist-focus") || !ui.Exists("id:playlist-picks") {
 		t.Fatal("playlists grid did not show all playlists")
 	}
+	if ui.Exists("id:playlists-search") || ui.Exists("id:playlists-refresh") {
+		t.Fatal("playlists page should not show search input or refresh button")
+	}
+
+	// New Playlist sits on the same row as the filter bar, and sort select text is vertically centered.
+	filterBar := reviewBounds(ui.Find("id:playlists-filter-bar"))
+	newBtn := reviewBounds(ui.Find("id:playlists-filter-bar >> id:new-playlist"))
+	if newBtn.Origin.Y < filterBar.Origin.Y-1 || newBtn.Origin.Y+newBtn.Size.Height > filterBar.Origin.Y+filterBar.Size.Height+1 {
+		t.Fatalf("new-playlist %+v is not aligned on playlists-filter-bar %+v", newBtn, filterBar)
+	}
+	sortBox := reviewBounds(ui.Find("id:playlists-sort"))
+	sortText := reviewBounds(ui.Find(`id:playlists-sort >> text:"Default Order"`))
+	boxMid := sortBox.Origin.Y + sortBox.Size.Height/2
+	textMid := sortText.Origin.Y + sortText.Size.Height/2
+	if diff := boxMid - textMid; diff < -1.5 || diff > 1.5 {
+		t.Fatalf("sort select label not vertically centered: box=%+v text=%+v", sortBox, sortText)
+	}
 
 	// Scope filtering: created vs saved.
 	ui.Press("id:playlists-tab-mine")
@@ -123,13 +140,6 @@ func TestDesktopPlaylistsPageFeatures(t *testing.T) {
 	ui.Press("id:playlists-tab-saved")
 	if ui.Exists("id:playlist-walks") || !ui.Exists("id:playlist-picks") {
 		t.Fatal("Saved Playlists filter did not isolate saved playlists")
-	}
-	ui.Press("id:playlists-tab-all")
-
-	// Search matches description and owner as well as title.
-	ui.Type("id:playlists-search", "editors")
-	if !ui.Exists("id:playlist-picks") || ui.Exists("id:playlist-walks") {
-		t.Fatal("search did not match playlist owner")
 	}
 	ui.Press("id:playlists-filter-reset")
 	if !ui.Exists("id:playlist-walks") || !ui.Exists("id:playlist-picks") {
@@ -150,7 +160,7 @@ func TestDesktopPlaylistsPageFeatures(t *testing.T) {
 	ui.Find("id:playlist-cover-btn-walks")
 	ui.Find("id:playlist-play-walks")
 
-	// New Playlist dialog opens from the header button.
+	// New Playlist dialog opens from the filter bar button.
 	ui.Press("id:new-playlist")
 	if !a.naming || !a.namingNew {
 		t.Fatal("new playlist button did not open creation dialog")
