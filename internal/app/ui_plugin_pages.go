@@ -194,7 +194,7 @@ func (a *app) extraPage(cx *core.Scope, p palette, r route) core.Node {
 	}
 	for _, comment := range d.comments {
 		c := comment
-		children := []core.Node{text(c.Author, 14, core.FontWeightSemibold, p.text), text(c.Text, 14, core.FontWeightNormal, p.text)}
+		children := []core.Node{text(c.Author, 14, core.FontWeightSemibold, p.text), text(music.FormatCommentText(c.Text), 14, core.FontWeightNormal, p.text)}
 		if a.can("likeComment") {
 			src := a.source()
 			children = append(children, a.settingsAction(p, fmt.Sprintf("♥ %d", c.Likes), "comment-like-"+c.ID, false, func() { a.sourceAction(src, func() error { return src.LikeComment(r.id, c.ID, !c.Liked) }, nil) }))

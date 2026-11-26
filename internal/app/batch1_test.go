@@ -216,8 +216,8 @@ func TestNowPlayingCommentsHotCommentsAndPodcastAbout(t *testing.T) {
 					Total: 2,
 					More:  false,
 					Comments: []music.Comment{
-						{ID: "c1", Author: "Alice", Text: "Best intro ever", Likes: 42},
-						{ID: "c2", Author: "Bob", Text: "Second comment", Likes: 5},
+						{ID: "c1", Author: "Alice", Text: "Best intro ever [玫瑰]", Likes: 42},
+						{ID: "c2", Author: "Bob", Text: "Second comment [未知]", Likes: 5},
 					},
 				}, nil
 			}
@@ -251,11 +251,13 @@ func TestNowPlayingCommentsHotCommentsAndPodcastAbout(t *testing.T) {
 	})
 	ui.Settle()
 
-	// Comments tab loads count and opens comments pane.
+	// Comments tab loads count and opens comments pane with emoticon shortcodes rendered as Unicode emoji.
 	ui.WaitUntil(2*time.Second, func() bool { return a.npComments.loaded && a.npComments.total == 2 })
 	ui.Find("id:np-tab-4")
 	ui.Press("id:np-tab-4")
-	ui.WaitUntil(2*time.Second, func() bool { return ui.Exists(`text:"Best intro ever"`) })
+	ui.WaitUntil(2*time.Second, func() bool {
+		return ui.Exists(`text:"Best intro ever 🌹"`) && ui.Exists(`text:"Second comment [未知]"`)
+	})
 
 	// Like comment toggles optimistically; rollback works on failure.
 	ui.Press("id:np-comment-like-c1")
@@ -290,10 +292,21 @@ func TestNowPlayingCommentsHotCommentsAndPodcastAbout(t *testing.T) {
 		t.Fatalf("quietComment(16s) = %+v, want nil during singing", got)
 	}
 
-	// Verify instrumental track (no lyrics) at 3s shows top comment card in Now Playing and clicking it opens Comments.
-	ui.WaitUntil(2*time.Second, func() bool { return ui.Exists("id:np-hot-comment") })
+	// Verify instrumental track (no lyrics) at 3s shows top comment card with formatted emoji and clicking it opens Comments.
+	ui.WaitUntil(2*time.Second, func() bool {
+		return ui.Exists("id:np-hot-comment") && ui.Exists(`text:"Best intro ever 🌹"`)
+	})
 	ui.Press("id:np-hot-comment")
 	ui.WaitUntil(2*time.Second, func() bool { return a.npPane.GetUntracked() == npPaneComments })
+
+	// Standalone comments page also renders emoticons.
+	a.post(func() {
+		a.closeNowPlaying()
+		a.open(route{page: pageComments, id: song.ID})
+	})
+	ui.WaitUntil(2*time.Second, func() bool { return ui.Exists(`text:"Best intro ever 🌹"`) })
+	a.post(func() { a.openNowPlaying() })
+	ui.Settle()
 
 	// Switch to a podcast episode: About tab becomes active and renders description.
 	ep := music.Track{ID: "ep1", Source: "cloud", ShowID: "show1", Name: "Episode 1", Description: "Deep dive into Go audio.", Duration: 120000}

@@ -312,7 +312,7 @@ func (a *app) hotCommentCard(cm *music.Comment, fontSize, maxWidth core.Points, 
 			icon(lucideMessageCircle, 14, core.RGBA(0xffffff, 0.5)),
 			core.Text{Content: i18n.T("Top Comment"), Style: core.Style{FontSize: 12.5, FontWeight: core.FontWeightBold, LetterSpacing: 0.6, Color: core.RGBA(0xffffff, 0.5)}},
 		}},
-		core.Text{Content: cm.Text, MaxLines: 6, Style: core.Style{FontSize: fontSize, FontWeight: core.FontWeightSemibold, LineHeightMultiple: 1.5, Color: core.RGBA(0xffffff, 0.92)}},
+		core.Text{Content: music.FormatCommentText(cm.Text), MaxLines: 6, Style: core.Style{FontSize: fontSize, FontWeight: core.FontWeightSemibold, LineHeightMultiple: 1.5, Color: core.RGBA(0xffffff, 0.92)}},
 		core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: meta},
 	}}
 }
@@ -404,7 +404,7 @@ func (a *app) commentsPane(cx *core.Scope, p palette, tr *music.Track, white cor
 						core.Text{Content: cm.Author, MaxLines: 1, Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), FontSize: 13, FontWeight: core.FontWeightSemibold, Color: core.RGBA(0xffffff, 0.65)}},
 						likeNode,
 					}},
-					core.Text{Content: cm.Text, Style: core.Style{FontSize: 14.5, LineHeightMultiple: 1.55, Color: core.RGBA(0xffffff, 0.92)}},
+					core.Text{Content: music.FormatCommentText(cm.Text), Style: core.Style{FontSize: 14.5, LineHeightMultiple: 1.55, Color: core.RGBA(0xffffff, 0.92)}},
 				)
 				if cm.Time > 0 {
 					col = append(col, text(i18n.Ago(time.UnixMilli(cm.Time), now), 11.5, core.FontWeightNormal, core.RGBA(0xffffff, 0.38)))
