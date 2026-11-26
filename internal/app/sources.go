@@ -168,6 +168,7 @@ func (a *app) activateSource(id string) {
 		a.likedSet[track.ID] = true
 	}
 	a.playlists = map[string]*playlistData{}
+	a.playlistsUI.reset()
 	a.albums = map[string]*albumData{}
 	a.artists = map[string]*artistData{}
 	a.browses = map[string]*browseData{}

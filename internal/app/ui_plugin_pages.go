@@ -192,19 +192,35 @@ func (a *app) sourceNavigation(p palette, r route, phone bool) []core.Node {
 		if phone {
 			rows = append(rows, a.phoneLibraryRow(p, id, title, "", svg, action))
 		} else {
-			rows = append(rows, a.navItem(p, id, svg, title, r.page == target.page && r.id == target.id, action))
+			selected := r.page == target.page && r.id == target.id
+			if target.page == pagePlaylists {
+				selected = r.page == pagePlaylists || r.page == pagePlaylist
+			}
+			rows = append(rows, a.navItem(p, id, svg, title, selected, action))
 		}
 	}
+	showPlaylists := !phone && (a.can("playlists") || a.can("createPlaylist"))
 	if a.source() == a.local {
 		add("nav-home", i18n.T("Home"), lucideHome, route{page: pageHome})
 		add("nav-songs", i18n.T("Songs"), lucideNote, route{page: pageBrowse, id: "songs"})
 		add("nav-albums", i18n.T("Albums"), lucideDisc, route{page: pageBrowse, id: "albums"})
 		add("nav-artists", i18n.T("Artists"), lucideUser, route{page: pageBrowse, id: "artists"})
 		add("nav-liked", i18n.T("Liked Songs"), lucideHeart, route{page: pageLiked})
+		if showPlaylists {
+			add("nav-playlists", i18n.T("Playlists"), lucideList, route{page: pagePlaylists})
+		}
 		return rows
 	}
 	nav := a.source().Info().Navigation
 	if len(nav) > 0 {
+		hasPlaylists := false
+		for _, item := range nav {
+			if item.Builtin == "playlists" {
+				hasPlaylists = true
+				break
+			}
+		}
+		playlistsAdded := false
 		for i, item := range nav {
 			target := route{page: pageBrowse, id: item.Page}
 			capability := "browse"
@@ -215,6 +231,9 @@ func (a *app) sourceNavigation(p palette, r route, phone bool) []core.Node {
 			case "liked":
 				target = route{page: pageLiked}
 				capability = "liked"
+			case "playlists":
+				target = route{page: pagePlaylists}
+				capability = "playlists"
 			case "shows":
 				target = route{page: pageShows}
 				capability = "shows"
@@ -233,6 +252,8 @@ func (a *app) sourceNavigation(p palette, r route, phone bool) []core.Node {
 						title = i18n.T("Home")
 					case pageLiked:
 						title = i18n.T("Liked Songs")
+					case pagePlaylists:
+						title = i18n.T("Playlists")
 					case pageSavedAlbums:
 						title = i18n.T("Saved Albums")
 					case pageShows:
@@ -243,17 +264,37 @@ func (a *app) sourceNavigation(p palette, r route, phone bool) []core.Node {
 						title = item.Page
 					}
 				}
-				add(fmt.Sprintf("source-nav-%d", i), title, sourceNavIcon(item.Icon, target.page), target)
+				id := fmt.Sprintf("source-nav-%d", i)
+				if target.page == pagePlaylists {
+					id = "nav-playlists"
+					playlistsAdded = true
+				}
+				add(id, title, sourceNavIcon(item.Icon, target.page), target)
+				if target.page == pageLiked && showPlaylists && !hasPlaylists && !playlistsAdded {
+					add("nav-playlists", i18n.T("Playlists"), lucideList, route{page: pagePlaylists})
+					playlistsAdded = true
+				}
 			}
 		}
+		if showPlaylists && !playlistsAdded {
+			add("nav-playlists", i18n.T("Playlists"), lucideList, route{page: pagePlaylists})
+		}
 	} else {
+		playlistsAdded := false
 		for _, item := range []struct {
 			cap, label string
 			page       pageKind
 		}{{"home", i18n.T("Home"), pageHome}, {"liked", i18n.T("Liked Songs"), pageLiked}, {"savedAlbums", i18n.T("Saved Albums"), pageSavedAlbums}, {"shows", i18n.T("Podcasts"), pageShows}, {"stations", i18n.T("Radio"), pageStations}} {
 			if a.can(item.cap) {
 				add("source-"+item.cap, item.label, sourceNavIcon("", item.page), route{page: item.page})
+				if item.page == pageLiked && showPlaylists && !playlistsAdded {
+					add("nav-playlists", i18n.T("Playlists"), lucideList, route{page: pagePlaylists})
+					playlistsAdded = true
+				}
 			}
+		}
+		if showPlaylists && !playlistsAdded {
+			add("nav-playlists", i18n.T("Playlists"), lucideList, route{page: pagePlaylists})
 		}
 	}
 	return rows
@@ -334,6 +375,8 @@ func sourceNavIcon(name string, page pageKind) *core.SVG {
 		return lucideHome
 	case pageLiked:
 		return lucideHeart
+	case pagePlaylists, pagePlaylist:
+		return lucideList
 	case pageSavedAlbums:
 		return lucideDisc
 	case pageShows, pageShow:

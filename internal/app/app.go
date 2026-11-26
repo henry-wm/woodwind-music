@@ -66,6 +66,7 @@ type pageKind int
 const (
 	pageHome pageKind = iota
 	pageLiked
+	pagePlaylists
 	pagePlaylist
 	pageAlbum
 	pageArtist
@@ -294,11 +295,13 @@ type app struct {
 
 	searchRef *core.Ref
 
-	playlists map[string]*playlistData
-	albums    map[string]*albumData
-	artists   map[string]*artistData
-	browses   map[string]*browseData
-	searches  map[route]*searchData
+	playlists      map[string]*playlistData
+	playlistsUI    playlistsUI
+	playlistCovers *playlistCoverStore
+	albums         map[string]*albumData
+	artists        map[string]*artistData
+	browses        map[string]*browseData
+	searches       map[route]*searchData
 
 	// Layout state.
 	volumeOpen        bool
@@ -314,8 +317,6 @@ type app struct {
 	scroll            map[string]core.Points
 	phoneTab          int
 	compact           bool
-	mineCollapsed     bool
-	savedCollapsed    bool
 	phoneTabs         [3]phoneTabState
 	phoneSheet        *core.Signal[string]
 	phoneLyrics       *core.Signal[bool]
@@ -394,6 +395,7 @@ func newApp(cx *core.Scope) *app {
 		cacheUsed:        -1,
 		likedSet:         map[string]bool{},
 		playlists:        map[string]*playlistData{},
+		playlistCovers:   loadPlaylistCovers(dir),
 		albums:           map[string]*albumData{},
 		artists:          map[string]*artistData{},
 		browses:          map[string]*browseData{},
@@ -658,6 +660,8 @@ func (a *app) reloadPage(r route) {
 	case pageHome:
 		// Read by reload.
 	case pageLiked:
+		// Read by reload.
+	case pagePlaylists:
 		// Read by reload.
 	case pagePlaylist:
 		a.loadPlaylist(r.id, false)
@@ -1084,7 +1088,6 @@ func (a *app) say(msg string) {
 
 // newPlaylist opens the dialog that names one.
 func (a *app) newPlaylist() {
-	a.mineCollapsed = false
 	a.naming, a.namingNew, a.namingText, a.namingID = true, true, "", ""
 	a.bump()
 }
@@ -1126,9 +1129,13 @@ func (a *app) confirmDelete(id, name string) {
 func (a *app) deletePlaylist() {
 	id := a.deletingID
 	src := a.source()
+	sourceID := src.Info().ID
 	a.deleting = false
 	a.bump()
 	a.sourceAction(src, func() error { return src.DeletePlaylist(id) }, func() {
+		if a.playlistCovers != nil {
+			_ = a.playlistCovers.Clear(sourceID, id)
+		}
 		if r := a.route.GetUntracked(); r.page == pagePlaylist && r.id == id {
 			a.back()
 		}

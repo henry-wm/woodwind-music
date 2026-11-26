@@ -70,6 +70,11 @@ var (
 	lucideSquareCheck  = lucide.SquareCheck()
 	lucidePin          = lucide.Pin()
 	lucideRotateCcw    = lucide.RotateCcw()
+	lucideLayoutGrid   = lucide.LayoutGrid()
+	lucideListRows     = lucide.List()
+	lucideImage        = lucide.Image()
+	lucideCamera       = lucide.Camera()
+	lucideRefreshCw    = lucide.RefreshCw()
 )
 
 func (a *app) palette(cx *core.Scope) palette {

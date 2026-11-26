@@ -5,10 +5,8 @@ import (
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/desktop"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
-	"github.com/nsgo-dev/nsgo/ui"
 
 	"github.com/HengWh/woodwind-music/internal/i18n"
-	"github.com/HengWh/woodwind-music/internal/music"
 )
 
 const sidebarWidth = 232
@@ -44,7 +42,6 @@ func (a *app) sidebar(cx *core.Scope, top core.Points) core.Node {
 									return a.navItem(p, "nav-results", lucideSearch, i18n.T("Search Results"), r.page == pageSearch, func() { a.open(last) })
 								}},
 						},
-						a.playlistSection(p, r),
 					}}
 				}),
 			}},
@@ -131,79 +128,6 @@ func (a *app) navItem(p palette, id string, svg *core.SVG, label string, selecte
 			return s
 		}, Children: []core.Node{icon(svg, 17, fg), text(label, 13.5, core.FontWeightMedium, p.text)}}
 	return b
-}
-
-// playlistSection keeps created and saved playlists in their own disclosures.
-func (a *app) playlistSection(p palette, r route) core.Node {
-	if !a.can("playlists") {
-		return core.Group{}
-	}
-	var mine, saved []music.Playlist
-	for _, pl := range a.mine {
-		if pl.Mine {
-			mine = append(mine, pl)
-		} else {
-			saved = append(saved, pl)
-		}
-	}
-	return core.Group{
-		a.playlistDisclosure(p, r, i18n.T("My Playlists"), "my-playlists", mine, true, &a.mineCollapsed),
-		a.playlistDisclosure(p, r, i18n.T("Saved Playlists"), "saved-playlists", saved, false, &a.savedCollapsed),
-	}
-}
-
-func (a *app) playlistDisclosure(p palette, r route, title, id string, lists []music.Playlist, mine bool, collapsed *bool) core.Node {
-	canCreate := mine && a.can("createPlaylist")
-	if len(lists) == 0 && !canCreate {
-		return core.Group{}
-	}
-	arrow := lucideChevronDown
-	if *collapsed {
-		arrow = lucideChevronRight
-	}
-	heading := []core.Node{base.Button{TestID: id + "-toggle", Label: title, Expanded: func() bool { return !*collapsed },
-		OnPress: func(core.PressEvent) { *collapsed = !*collapsed; a.bump() },
-		Style: core.Style{FlexGrow: 1, Height: core.Pt(26), Padding: core.Symmetric(0, 4), Gap: 6, CornerRadius: 6,
-			Direction: core.Row, AlignItems: core.AlignCenter, Hover: &core.Style{Background: p.hover}},
-		Children: []core.Node{core.Text{Content: title, Style: core.Style{FlexGrow: 1, FontSize: 11.5, FontWeight: core.FontWeightSemibold, Color: p.faint}}, icon(arrow, 12, p.faint)}}}
-	if canCreate {
-		heading = append(heading, base.Button{Label: i18n.T("New Playlist"), TestID: "new-playlist", OnPress: func(core.PressEvent) { a.newPlaylist() },
-			Style: core.Style{Width: core.Pt(26), Height: core.Pt(26), Direction: core.Row, AlignItems: core.AlignCenter,
-				JustifyContent: core.JustifyCenter, CornerRadius: 6, Hover: &core.Style{Background: p.hover}},
-			Children: []core.Node{icon(lucidePlus, 13, p.faint)}})
-	}
-	rows := []core.Node{core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter,
-		Margin: core.Edges{Top: 18, Right: 4, Bottom: 6, Left: 6}}, Children: heading}}
-	if !*collapsed {
-		for _, pl := range lists {
-			selected := r.page == pagePlaylist && r.id == pl.ID && !a.nowPlaying
-			rows = append(rows, a.playlistRow(p, pl, selected))
-		}
-	}
-	return core.View{Style: core.Style{Direction: core.Column}, Children: rows}
-}
-
-func (a *app) playlistRow(p palette, pl music.Playlist, selected bool) core.Node {
-	row := base.Button{Label: pl.Name, TestID: "playlist-" + pl.ID, OnPress: func(core.PressEvent) { a.open(route{page: pagePlaylist, id: pl.ID}) },
-		Selected: func() bool { return selected },
-		StyleFunc: func() core.Style {
-			s := core.Style{Height: core.Pt(34), Padding: core.Symmetric(0, 8), Gap: 10, Direction: core.Row,
-				AlignItems: core.AlignCenter, CornerRadius: 8, Hover: &core.Style{Background: p.hover}}
-			if selected {
-				s.Background = p.press
-			}
-			return s
-		}, Children: []core.Node{core.View{Style: core.Style{Width: core.Pt(22), Height: core.Pt(22), FlexShrink: 0},
-			Children: []core.Node{a.cover(p, pl.ImageURL, 22, 5)}}, core.Text{Content: pl.Name, MaxLines: 1,
-			Style: core.Style{FlexShrink: 1, MinWidth: core.Pt(0), Color: p.text, FontSize: 13}}}}
-	items := a.playlistMenu(pl)
-	if !pl.Mine && a.can("savePlaylist") {
-		items = []core.Node{ui.MenuItem{Text: i18n.T("Remove from Saved"), OnSelect: func() { a.setPlaylistSaved(pl.ID, false) }}}
-	}
-	if len(items) == 0 {
-		return row
-	}
-	return ui.ContextMenu{Trigger: row, Children: items}
 }
 
 // sidebarFooter is the settings and the folders.
