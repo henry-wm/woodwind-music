@@ -597,11 +597,10 @@ var zhCN = map[string]string{
 	"Showing %d of %d playlists":               "显示 %d / %d 个歌单",
 	"%d playlists · %d created · %d saved":     "共 %d 个歌单 · 自建 %d · 收藏 %d",
 	"%d playlists":                             "共 %d 个歌单",
-	"Search playlists":                         "搜索歌单",
 	"Grid View":                                "网格视图",
 	"List View":                                "列表视图",
 	"Default Order":                            "默认排序",
 	"Most Songs":                               "歌曲最多",
 	"No matching playlists":                    "没有匹配的歌单",
-	"Try a different keyword or filter.":       "试试其他关键词或筛选条件。",
+	"Try a different filter.":                  "试试其他筛选条件。",
 }

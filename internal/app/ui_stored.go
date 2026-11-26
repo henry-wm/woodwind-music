@@ -679,10 +679,10 @@ func (a *app) storedFilterSelect(p palette, id, label string, value *string, pho
 			}
 		},
 		RootStyle: core.Style{FlexShrink: 0},
-		Style: core.Style{Height: core.Pt(height), BorderWidth: 1, BorderColor: border, CornerRadius: radius,
+		Style: core.Style{Height: core.Pt(height), JustifyContent: core.JustifyCenter, BorderWidth: 1, BorderColor: border, CornerRadius: radius,
 			Background: bg, Hover: &core.Style{Background: p.press},
 			FocusVisible: &core.Style{OutlineWidth: 3, OutlineColor: ui.Alpha(p.accent, .25)}},
-		Trigger: core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter,
+		Trigger: core.View{Style: core.Style{FlexGrow: 1, Direction: core.Row, AlignItems: core.AlignCenter,
 			Padding: core.Symmetric(0, padH), Gap: 6}, Children: []core.Node{
 			core.Text{Content: title, MaxLines: 1, Style: core.Style{FontSize: fontSize, FontWeight: core.FontWeightMedium, Color: fg}},
 			icon(lucideChevronDown, 11, fg),
@@ -690,7 +690,7 @@ func (a *app) storedFilterSelect(p palette, id, label string, value *string, pho
 		PopupStyle: core.Style{MinWidth: core.Pt(150), Background: p.sidebar, BorderWidth: 1, BorderColor: p.hairline,
 			CornerRadius: 10, Padding: core.All(4), ShadowColor: p.cardShade, ShadowRadius: 16, ShadowOffset: core.Point{Y: 6}},
 		ListStyle: core.Style{MaxHeight: core.Pt(280)}, Margin: 8,
-		ItemStyle: core.Style{MinHeight: core.Pt(itemHeight), Padding: core.Symmetric(4, 8), CornerRadius: 6,
+		ItemStyle: core.Style{MinHeight: core.Pt(itemHeight), JustifyContent: core.JustifyCenter, Padding: core.Symmetric(4, 8), CornerRadius: 6,
 			Focus: &core.Style{Background: p.accent, Color: p.onAccent}, Color: p.text},
 		RenderItem: func(e base.SelectEntry) core.Node {
 			checked := e.Index == chosen
