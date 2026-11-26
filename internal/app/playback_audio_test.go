@@ -1,7 +1,6 @@
 package app
 
 import (
-	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/nsgo-dev/nsgo/desktop"
 	"github.com/nsgo-dev/nsgo/nsgotest"
 
+	"github.com/HengWh/woodwind-music/internal/music"
 	"github.com/HengWh/woodwind-music/internal/player"
 )
 
@@ -107,8 +107,7 @@ func TestDesktopPlayPauseButtonFadesAndPausesNSGoAudio(t *testing.T) {
 				a.tray = &testWindowsTray{registered: true}
 				cx.SetMainView(a.view)
 			}, nsgotest.Environment(core.Environment{OS: platform, Audio: true}), nsgotest.Size(1180, 780))
-			trackURI := (&url.URL{Scheme: "file", Path: filepath.ToSlash(trackPath)}).String()
-			ui.AudioDurations = map[string]time.Duration{trackURI: time.Minute, trackPath: time.Minute}
+			ui.AudioDurations = map[string]time.Duration{music.FileURL(trackPath): time.Minute}
 
 			ui.Post(func() { a.local.AddFolders(musicDir) })
 			ui.WaitUntil(5*time.Second, func() bool {
